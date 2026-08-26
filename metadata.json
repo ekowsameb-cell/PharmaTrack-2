@@ -1,0 +1,6 @@
+{
+  "name": "PharmaTrack Ghana ERP",
+  "description": "Retail pharmacy ERP localized for Ghana with Dual-Zone POS, split-billing, FEFO expiry control, GRA E-VAT invoice integration, NHIS G-Form claims, MoMo/GhQR payments, GPhC Dangerous Drugs Register (DDR), and offline-first resilience.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
