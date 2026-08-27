@@ -1,4 +1,4 @@
-import { DrugItem, PatientProfile, PrivateInsurer, PharmacyConfig } from '../types/pharmacy';
+import { DrugItem, PatientProfile, PrivateInsurer, PharmacyConfig, TransactionRecord } from '../types/pharmacy';
 
 // Helper function to calculate date offset from current date
 const getDateOffset = (months: number, days: number = 0): string => {
@@ -7,6 +7,15 @@ const getDateOffset = (months: number, days: number = 0): string => {
   d.setDate(d.getDate() + days);
   return d.toISOString().split('T')[0];
 };
+
+// Helper function to get past ISO timestamp
+const getPastIsoTimestamp = (daysAgo: number, hour: number = 10, min: number = 30): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  d.setHours(hour, min, 0, 0);
+  return d.toISOString();
+};
+
 
 export const INITIAL_PHARMACY_CONFIG: PharmacyConfig = {
   pharmacyName: 'PharmaTrack Community Chemist',
@@ -619,3 +628,505 @@ export const INITIAL_PATIENT_PROFILES: PatientProfile[] = [
     chronicConditions: []
   }
 ];
+
+export const INITIAL_TRANSACTIONS: TransactionRecord[] = [
+  // Transaction 1: Today - Malaria + Antibiotic (SSNIT)
+  {
+    id: 'TXN-GH-948201-1',
+    sequenceNumber: 1,
+    timestamp: getPastIsoTimestamp(0, 9, 15),
+    lane: 'clinical',
+    patient: INITIAL_PATIENT_PROFILES[0],
+    prescription: {
+      prescriberName: 'Dr. Michael K. Mensah',
+      prescriberMdcNumber: 'MDC/RN/39482',
+      prescriberHospital: 'Korle-Bu Teaching Hospital',
+      prescriptionDate: getPastIsoTimestamp(0, 8, 30).split('T')[0],
+      diagnosisIcd10: 'B54 (Unspecified Malaria)',
+      clinicalNotes: 'Artemether + Augmentin for concurrent respiratory symptoms'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[1], // Coartem 80/480
+        selectedBatch: INITIAL_DRUG_ITEMS[1].batches[0],
+        quantity: 1,
+        unitPrice: 28.00,
+        totalPrice: 28.00,
+        isNhisTariff: true,
+        dosageInstructions: '1 tablet BD x 3 days'
+      },
+      {
+        drug: INITIAL_DRUG_ITEMS[0], // Augmentin 625mg
+        selectedBatch: INITIAL_DRUG_ITEMS[0].batches[0],
+        quantity: 1,
+        unitPrice: 42.50,
+        totalPrice: 42.50,
+        isNhisTariff: true,
+        dosageInstructions: '1 tablet BD x 7 days'
+      }
+    ],
+    grossAmount: 70.50,
+    discountAmount: 0,
+    netAmount: 70.50,
+    splitBilling: {
+      nhisAmount: 70.50,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 59.50,
+      totalPaid: 70.50
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001091',
+      graSecurityHash: '0x8849FA29103C8821',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001091',
+      graTimestamp: getPastIsoTimestamp(0, 9, 15),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 70.50,
+      nhilAmount: 1.76,
+      getfundAmount: 1.76,
+      covidAmount: 0.71,
+      standardVatAmount: 11.21,
+      totalTax: 15.44,
+      grandTotal: 70.50,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: false,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0281'
+  },
+
+  // Transaction 2: 2 days ago - Chronic NCD: Diabetes & Hypertension (SSNIT)
+  {
+    id: 'TXN-GH-948202-2',
+    sequenceNumber: 2,
+    timestamp: getPastIsoTimestamp(2, 11, 45),
+    lane: 'clinical',
+    patient: INITIAL_PATIENT_PROFILES[2], // Kwame Osei-Tutu
+    prescription: {
+      prescriberName: 'Dr. Evelyn Asare',
+      prescriberMdcNumber: 'MDC/RN/44910',
+      prescriberHospital: 'Greater Accra Regional Hospital (Ridge)',
+      prescriptionDate: getPastIsoTimestamp(2, 10, 0).split('T')[0],
+      diagnosisIcd10: 'E11.9 (Type 2 Diabetes Mellitus) + I10 (Essential Hypertension)',
+      clinicalNotes: 'Monthly chronic refill'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[4], // Metformin 500mg
+        selectedBatch: INITIAL_DRUG_ITEMS[4].batches[0],
+        quantity: 2,
+        unitPrice: 16.50,
+        totalPrice: 33.00,
+        isNhisTariff: true,
+        dosageInstructions: '500mg BD with meals'
+      },
+      {
+        drug: INITIAL_DRUG_ITEMS[5], // Amlodipine 10mg
+        selectedBatch: INITIAL_DRUG_ITEMS[5].batches[0],
+        quantity: 1,
+        unitPrice: 24.00,
+        totalPrice: 24.00,
+        isNhisTariff: true,
+        dosageInstructions: '10mg Nocté'
+      }
+    ],
+    grossAmount: 57.00,
+    discountAmount: 0,
+    netAmount: 57.00,
+    splitBilling: {
+      nhisAmount: 57.00,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 23.00,
+      totalPaid: 57.00
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001092',
+      graSecurityHash: '0x1038ABCE481920',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001092',
+      graTimestamp: getPastIsoTimestamp(2, 11, 45),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 57.00,
+      nhilAmount: 1.43,
+      getfundAmount: 1.43,
+      covidAmount: 0.57,
+      standardVatAmount: 9.06,
+      totalTax: 12.49,
+      grandTotal: 57.00,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: false,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0282'
+  },
+
+  // Transaction 3: 5 days ago - Antenatal & UTI (Pregnant Category)
+  {
+    id: 'TXN-GH-948203-3',
+    sequenceNumber: 3,
+    timestamp: getPastIsoTimestamp(5, 14, 20),
+    lane: 'clinical',
+    patient: INITIAL_PATIENT_PROFILES[1], // Akua Serwaa Dankwa (Pregnant)
+    prescription: {
+      prescriberName: 'Dr. Joseph N. Addo',
+      prescriberMdcNumber: 'MDC/RN/29184',
+      prescriberHospital: '37 Military Hospital',
+      prescriptionDate: getPastIsoTimestamp(5, 13, 10).split('T')[0],
+      diagnosisIcd10: 'N39.0 (Urinary Tract Infection in Pregnancy)',
+      clinicalNotes: 'Amoxicillin clavulanate safe in 2nd trimester'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[0], // Augmentin 625mg
+        selectedBatch: INITIAL_DRUG_ITEMS[0].batches[0],
+        quantity: 1,
+        unitPrice: 42.50,
+        totalPrice: 42.50,
+        isNhisTariff: true,
+        dosageInstructions: '1 tablet BD x 7 days'
+      },
+      {
+        drug: INITIAL_DRUG_ITEMS[6], // Panadol Extra
+        selectedBatch: INITIAL_DRUG_ITEMS[6].batches[0],
+        quantity: 1,
+        unitPrice: 6.00,
+        totalPrice: 6.00,
+        isNhisTariff: true,
+        dosageInstructions: '2 tabs PRN for pyrexia'
+      }
+    ],
+    grossAmount: 48.50,
+    discountAmount: 0,
+    netAmount: 48.50,
+    splitBilling: {
+      nhisAmount: 48.50,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 51.50,
+      totalPaid: 48.50
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001093',
+      graSecurityHash: '0x9948210381029',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001093',
+      graTimestamp: getPastIsoTimestamp(5, 14, 20),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 48.50,
+      nhilAmount: 1.21,
+      getfundAmount: 1.21,
+      covidAmount: 0.49,
+      standardVatAmount: 7.71,
+      totalTax: 10.62,
+      grandTotal: 48.50,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: false,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0283'
+  },
+
+  // Transaction 4: 12 days ago - Acute Diarrhoeal Disease (Informal Sector)
+  {
+    id: 'TXN-GH-948204-4',
+    sequenceNumber: 4,
+    timestamp: getPastIsoTimestamp(12, 16, 5),
+    lane: 'clinical',
+    patient: INITIAL_PATIENT_PROFILES[3], // Ama Pokuaa (Informal)
+    prescription: {
+      prescriberName: 'Dr. Samuel K. Arthur',
+      prescriberMdcNumber: 'MDC/RN/51940',
+      prescriberHospital: 'La General Hospital',
+      prescriptionDate: getPastIsoTimestamp(12, 15, 0).split('T')[0],
+      diagnosisIcd10: 'A09 (Infectious Gastroenteritis & Colitis)',
+      clinicalNotes: 'ORS Zinc replacement + Ciprofloxacin'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[11], // ORS + Zinc
+        selectedBatch: INITIAL_DRUG_ITEMS[11].batches[0],
+        quantity: 2,
+        unitPrice: 5.50,
+        totalPrice: 11.00,
+        isNhisTariff: true,
+        dosageInstructions: 'Dissolve 1 sachet in 1L clean water. Zinc 20mg daily x 10 days'
+      },
+      {
+        drug: INITIAL_DRUG_ITEMS[8], // Ciprofloxacin 500mg
+        selectedBatch: INITIAL_DRUG_ITEMS[8].batches[0],
+        quantity: 1,
+        unitPrice: 20.00,
+        totalPrice: 20.00,
+        isNhisTariff: true,
+        dosageInstructions: '500mg BD x 5 days'
+      }
+    ],
+    grossAmount: 31.00,
+    discountAmount: 0,
+    netAmount: 31.00,
+    splitBilling: {
+      nhisAmount: 31.00,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 21.00,
+      totalPaid: 31.00
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001094',
+      graSecurityHash: '0x4482019481028',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001094',
+      graTimestamp: getPastIsoTimestamp(12, 16, 5),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 31.00,
+      nhilAmount: 0.78,
+      getfundAmount: 0.78,
+      covidAmount: 0.31,
+      standardVatAmount: 4.93,
+      totalTax: 6.80,
+      grandTotal: 31.00,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: false,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0284'
+  },
+
+  // Transaction 5: 25 days ago - Gastroesophageal Reflux & Dyspepsia
+  {
+    id: 'TXN-GH-948205-5',
+    sequenceNumber: 5,
+    timestamp: getPastIsoTimestamp(25, 10, 10),
+    lane: 'clinical',
+    patient: INITIAL_PATIENT_PROFILES[0],
+    prescription: {
+      prescriberName: 'Dr. Michael K. Mensah',
+      prescriberMdcNumber: 'MDC/RN/39482',
+      prescriberHospital: 'Korle-Bu Teaching Hospital',
+      prescriptionDate: getPastIsoTimestamp(25, 9, 30).split('T')[0],
+      diagnosisIcd10: 'K21.9 (Gastro-oesophageal Reflux Disease)',
+      clinicalNotes: 'Omeprazole 20mg BD before meals'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[9], // Omeprazole 20mg
+        selectedBatch: INITIAL_DRUG_ITEMS[9].batches[0],
+        quantity: 2,
+        unitPrice: 12.00,
+        totalPrice: 24.00,
+        isNhisTariff: true,
+        dosageInstructions: '20mg BD x 14 days'
+      }
+    ],
+    grossAmount: 24.00,
+    discountAmount: 0,
+    netAmount: 24.00,
+    splitBilling: {
+      nhisAmount: 24.00,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 26.00,
+      totalPaid: 24.00
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001095',
+      graSecurityHash: '0x5592810482019',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001095',
+      graTimestamp: getPastIsoTimestamp(25, 10, 10),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 24.00,
+      nhilAmount: 0.60,
+      getfundAmount: 0.60,
+      covidAmount: 0.24,
+      standardVatAmount: 3.82,
+      totalTax: 5.26,
+      grandTotal: 24.00,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: false,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0285'
+  },
+
+  // Transaction 6: 38 days ago (Last Month) - Malaria & Fever
+  {
+    id: 'TXN-GH-948190-6',
+    sequenceNumber: 6,
+    timestamp: getPastIsoTimestamp(38, 15, 30),
+    lane: 'clinical',
+    patient: INITIAL_PATIENT_PROFILES[2],
+    prescription: {
+      prescriberName: 'Dr. Evelyn Asare',
+      prescriberMdcNumber: 'MDC/RN/44910',
+      prescriberHospital: 'Ridge Hospital Accra',
+      prescriptionDate: getPastIsoTimestamp(38, 14, 0).split('T')[0],
+      diagnosisIcd10: 'B54 (Plasmodium Falciparum Malaria)',
+      clinicalNotes: 'Confirmed RDT positive'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[1], // Coartem 80/480
+        selectedBatch: INITIAL_DRUG_ITEMS[1].batches[0],
+        quantity: 1,
+        unitPrice: 28.00,
+        totalPrice: 28.00,
+        isNhisTariff: true,
+        dosageInstructions: '1 tablet BD x 3 days'
+      },
+      {
+        drug: INITIAL_DRUG_ITEMS[6], // Panadol Extra
+        selectedBatch: INITIAL_DRUG_ITEMS[6].batches[0],
+        quantity: 1,
+        unitPrice: 6.00,
+        totalPrice: 6.00,
+        isNhisTariff: true,
+        dosageInstructions: '2 tabs TDS PRN'
+      }
+    ],
+    grossAmount: 34.00,
+    discountAmount: 0,
+    netAmount: 34.00,
+    splitBilling: {
+      nhisAmount: 34.00,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 26.00,
+      totalPaid: 34.00
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001080',
+      graSecurityHash: '0x1293847581029',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001080',
+      graTimestamp: getPastIsoTimestamp(38, 15, 30),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 34.00,
+      nhilAmount: 0.85,
+      getfundAmount: 0.85,
+      covidAmount: 0.34,
+      standardVatAmount: 5.41,
+      totalTax: 7.45,
+      grandTotal: 34.00,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: false,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0286'
+  },
+
+  // Transaction 7: 45 days ago (Last Month) - Upper Respiratory Tract Infection (Under 18)
+  {
+    id: 'TXN-GH-948185-7',
+    sequenceNumber: 7,
+    timestamp: getPastIsoTimestamp(45, 11, 20),
+    lane: 'clinical',
+    patient: {
+      id: 'pat-005',
+      fullName: 'Master Yaw Boadi',
+      phone: '+233 24 400 1122',
+      nationalId: 'GHA-092817492-3',
+      age: 8,
+      gender: 'M',
+      nhisNumber: 'NHIS-33445566',
+      nhisStatus: 'Active',
+      nhisCategory: 'Under 18',
+      allergies: []
+    },
+    prescription: {
+      prescriberName: 'Dr. Joseph N. Addo',
+      prescriberMdcNumber: 'MDC/RN/29184',
+      prescriberHospital: 'Princess Marie Louise Children Hospital',
+      prescriptionDate: getPastIsoTimestamp(45, 10, 0).split('T')[0],
+      diagnosisIcd10: 'J06.9 (Acute Upper Respiratory Infection)',
+      clinicalNotes: 'Pediatric cough & bacterial bronchitis'
+    },
+    items: [
+      {
+        drug: INITIAL_DRUG_ITEMS[0], // Augmentin 625mg
+        selectedBatch: INITIAL_DRUG_ITEMS[0].batches[0],
+        quantity: 1,
+        unitPrice: 42.50,
+        totalPrice: 42.50,
+        isNhisTariff: true,
+        dosageInstructions: '1 tablet daily x 5 days'
+      },
+      {
+        drug: INITIAL_DRUG_ITEMS[10], // Benylin with Codeine / Cough
+        selectedBatch: INITIAL_DRUG_ITEMS[10].batches[0],
+        quantity: 1,
+        unitPrice: 26.00,
+        totalPrice: 26.00,
+        isNhisTariff: true,
+        dosageInstructions: '5ml TDS x 5 days'
+      }
+    ],
+    grossAmount: 68.50,
+    discountAmount: 0,
+    netAmount: 68.50,
+    splitBilling: {
+      nhisAmount: 68.50,
+      privateInsuranceAmount: 0,
+      momoAmount: 0,
+      cashAmount: 0,
+      ghqrAmount: 0,
+      patientCopayTotal: 71.50,
+      totalPaid: 68.50
+    },
+    graEvat: {
+      status: 'SUCCESS',
+      graInvoiceNumber: 'GRA-2026-INV-001075',
+      graSecurityHash: '0x3394820194820',
+      graQrCodeString: 'https://verify.gra.gov.gh/evat/inv/001075',
+      graTimestamp: getPastIsoTimestamp(45, 11, 20),
+      transmissionMode: 'REAL_TIME'
+    },
+    taxBreakdown: {
+      taxableAmount: 68.50,
+      nhilAmount: 1.71,
+      getfundAmount: 1.71,
+      covidAmount: 0.69,
+      standardVatAmount: 10.89,
+      totalTax: 15.00,
+      grandTotal: 68.50,
+      leviesIncluded: true
+    },
+    hasControlledDrugs: true,
+    cashierName: 'Pharm. Akosua Mensah',
+    isSyncedToCloud: true,
+    tamperProofHash: '0x9948AEF0287'
+  }
+];
+

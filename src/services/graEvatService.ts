@@ -94,3 +94,48 @@ export const transmitToGraEvat = async (
     transmissionMode: 'REAL_TIME'
   };
 };
+
+export const generateGraFiscalStamp = (amount: number, config: PharmacyConfig): GraEvatResponse => {
+  const timestamp = new Date().toISOString();
+  const year = new Date().getFullYear();
+  const seq = Math.floor(100000 + Math.random() * 900000);
+  const graInvoiceNumber = `GRA-${year}-INV-${seq}`;
+  const securityHash = generateSecurityHash(graInvoiceNumber, config.graTin, amount, timestamp);
+  const qrString = `https://verify.gra.gov.gh/evat/v1/invoice?tin=${config.graTin}&inv=${graInvoiceNumber}&dt=${encodeURIComponent(timestamp)}&amt=${amount.toFixed(2)}&hash=${securityHash}`;
+
+  return {
+    status: config.isOnlineMode ? 'SUCCESS' : 'QUEUED_OFFLINE',
+    graInvoiceNumber,
+    graSecurityHash: securityHash,
+    graQrCodeString: qrString,
+    graTimestamp: timestamp,
+    transmissionMode: config.isOnlineMode ? 'REAL_TIME' : 'OFFLINE_SYNCED'
+  };
+};
+
+export const calculateGraEvatTax = (amount: number, config: PharmacyConfig): GraEvatTaxBreakdown => {
+  const nhilRate = config.nhilRate / 100;
+  const getfundRate = config.getfundRate / 100;
+  const covidRate = config.covidRate / 100;
+  const vatRate = config.vatRate / 100;
+
+  const nhilAmount = parseFloat((amount * nhilRate).toFixed(2));
+  const getfundAmount = parseFloat((amount * getfundRate).toFixed(2));
+  const covidAmount = parseFloat((amount * covidRate).toFixed(2));
+
+  const vatBase = amount + nhilAmount + getfundAmount + covidAmount;
+  const standardVatAmount = parseFloat((vatBase * vatRate).toFixed(2));
+  const totalTax = parseFloat((nhilAmount + getfundAmount + covidAmount + standardVatAmount).toFixed(2));
+
+  return {
+    taxableAmount: parseFloat(amount.toFixed(2)),
+    nhilAmount,
+    getfundAmount,
+    covidAmount,
+    standardVatAmount,
+    totalTax,
+    grandTotal: parseFloat((amount + totalTax).toFixed(2)),
+    leviesIncluded: true
+  };
+};
+

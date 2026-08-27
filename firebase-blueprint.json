@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "users": {
+      "fields": {
+        "email": { "type": "string", "description": "User email" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "Profile picture URL" },
+        "role": { "type": "string", "description": "Assigned pharmacy role (Clerk, Pharmacist, Cashier, Owner)" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" },
+        "lastLoginAt": { "type": "string", "description": "ISO timestamp of last sign-in" }
+      }
+    },
+    "transactions": {
+      "fields": {
+        "sequenceNumber": { "type": "number", "description": "Sequential transaction ID" },
+        "timestamp": { "type": "string", "description": "Transaction date and time" },
+        "lane": { "type": "string", "description": "POS Lane (retail / clinical)" },
+        "grossAmount": { "type": "number", "description": "Gross sale amount" },
+        "netAmount": { "type": "number", "description": "Net payable amount" },
+        "cashierName": { "type": "string", "description": "Cashier who processed the transaction" },
+        "graEvat": { "type": "object", "description": "GRA E-VAT fiscalization payload" },
+        "splitBilling": { "type": "object", "description": "Split billing and payment allocation" }
+      }
+    },
+    "pharmacy_queues": {
+      "fields": {
+        "queueNumber": { "type": "number", "description": "Queue token number" },
+        "queueToken": { "type": "string", "description": "Display token e.g. Q-101" },
+        "clerkName": { "type": "string", "description": "Clerk who staged the order" },
+        "patientName": { "type": "string", "description": "Patient full name" },
+        "schemeType": { "type": "string", "description": "CASH | NHIS | PRIVATE_INSURANCE" },
+        "status": { "type": "string", "description": "DRAFT | PENDING_CLINICAL_CLEARANCE | PENDING_PAYMENT | SETTLED | HOLD" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      }
+    },
+    "work_music_tracks": {
+      "fields": {
+        "title": { "type": "string", "description": "Track title" },
+        "genre": { "type": "string", "description": "Music genre/vibe" },
+        "prompt": { "type": "string", "description": "Prompt used for Lyria generation" },
+        "model": { "type": "string", "description": "Model used e.g. lyria-3-clip-preview" },
+        "durationSeconds": { "type": "number", "description": "Duration in seconds" },
+        "createdBy": { "type": "string", "description": "User ID of creator" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      }
+    }
+  }
+}

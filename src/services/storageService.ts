@@ -10,8 +10,10 @@ import {
 import { 
   INITIAL_DRUG_ITEMS, 
   INITIAL_PHARMACY_CONFIG, 
-  INITIAL_PRIVATE_INSURERS 
+  INITIAL_PRIVATE_INSURERS,
+  INITIAL_TRANSACTIONS
 } from '../data/mockPharmacyData';
+
 
 const STORAGE_KEYS = {
   DRUGS: 'pharmatrack_gh_drugs_v1',
@@ -130,12 +132,17 @@ export const saveStoredDrugs = (drugs: DrugItem[]): void => {
 export const getStoredTransactions = (): TransactionRecord[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
   } catch (e) {
     console.error('Failed to load transactions', e);
   }
-  return [];
+  localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(INITIAL_TRANSACTIONS));
+  return INITIAL_TRANSACTIONS;
 };
+
 
 export const saveStoredTransactions = (transactions: TransactionRecord[]): void => {
   localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
@@ -232,4 +239,26 @@ export const getStoredInsurers = (): PrivateInsurer[] => {
 
 export const saveStoredInsurers = (insurers: PrivateInsurer[]): void => {
   localStorage.setItem(STORAGE_KEYS.INSURERS, JSON.stringify(insurers));
+};
+
+import { 
+  getStoredBasketQueue, 
+  saveStoredBasketQueue 
+} from './queueService';
+import { 
+  getStoredPurchaseOrders, 
+  saveStoredPurchaseOrders 
+} from './purchaseOrderService';
+import { 
+  getStoredPayroll, 
+  saveStoredPayroll 
+} from './payrollService';
+
+export {
+  getStoredBasketQueue,
+  saveStoredBasketQueue,
+  getStoredPurchaseOrders,
+  saveStoredPurchaseOrders,
+  getStoredPayroll,
+  saveStoredPayroll
 };

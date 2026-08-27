@@ -1,5 +1,44 @@
 export type DrugClassification = 'OTC' | 'POM' | 'ClassA_Controlled' | 'ClassB_Controlled';
 
+export type UserRole = 'Clerk' | 'Pharmacist' | 'Cashier' | 'Owner' | 'COUNTER_CLERK' | 'SUPERINTENDENT_PHARMACIST' | 'CASHIER' | 'OWNER';
+
+export type AppTabType = 
+  | 'clerk'
+  | 'pharmacist'
+  | 'cashier'
+  | 'owner'
+  | 'pos'
+  | 'inventory'
+  | 'nhis'
+  | 'ddr'
+  | 'audit';
+
+export type NormalizedRole = 'CLERK' | 'PHARMACIST' | 'CASHIER' | 'OWNER';
+
+export type ActionPermission =
+  | 'STAGE_ORDER'
+  | 'LOOKUP_INVENTORY'
+  | 'READ_SHELF_LOCATION'
+  | 'APPROVE_CLINICAL'
+  | 'VERIFY_DOCTOR_MDC'
+  | 'LOG_DDR'
+  | 'HOLD_REJECT_ORDER'
+  | 'OVERRIDE_DRUG_INTERACTION'
+  | 'PROCESS_PAYMENT'
+  | 'EXECUTE_MOMO_STK'
+  | 'SPLIT_BILLING'
+  | 'GENERATE_EVAT'
+  | 'PRINT_FISCAL_RECEIPT'
+  | 'APPROVE_PURCHASE_ORDER'
+  | 'REJECT_PURCHASE_ORDER'
+  | 'EXECUTE_PAYROLL'
+  | 'BULK_MOMO_DISBURSAL'
+  | 'VIEW_FINANCIAL_AUDIT'
+  | 'VIEW_EXECUTIVE_HUB'
+  | 'ACCESS_DDR_REGISTER'
+  | 'MANAGE_SYSTEM_SETTINGS'
+  | 'RESET_DEMO_DATA';
+
 export type ExpiryStatus = 'green' | 'yellow' | 'red'; // green > 6mo, yellow 3-6mo, red < 3mo (locked)
 
 export type PosLaneType = 'retail' | 'clinical';
@@ -201,13 +240,150 @@ export interface AuditLog {
   userName: string;
   role: string;
   action: string;
-  module: 'INVENTORY' | 'PRICING' | 'DISPENSING' | 'GRA_EVAT' | 'NHIS' | 'CONTROLLED_DRUGS' | 'SETTINGS';
+  module: 'INVENTORY' | 'PRICING' | 'DISPENSING' | 'GRA_EVAT' | 'NHIS' | 'CONTROLLED_DRUGS' | 'SETTINGS' | 'PAYROLL' | 'PURCHASE_ORDERS';
   entityId?: string;
   fieldName?: string;
   oldValue?: string;
   newValue?: string;
   ipDeviceId: string;
   hash: string;
+}
+
+export type UnitSaleType = 'box' | 'strip' | 'tablet';
+
+export interface BasketItemWithUnit {
+  id: string;
+  drug: DrugItem;
+  selectedBatch: DrugBatch;
+  quantity: number;
+  saleUnit: UnitSaleType;
+  unitsPerPack: number;
+  unitPriceGhs: number;
+  totalPriceGhs: number;
+  expirySafe: boolean;
+  expiryDate: string;
+  requiresDoctorMdc?: boolean;
+}
+
+export type QueueBasketStatus = 
+  | 'DRAFT'
+  | 'PENDING_CLINICAL_CLEARANCE'
+  | 'PENDING_PHARMACIST' 
+  | 'PENDING_PAYMENT'
+  | 'PENDING_CASHIER' 
+  | 'FISCALIZED_COMPLETED'
+  | 'PAID_COMPLETED' 
+  | 'REJECTED' 
+  | 'HOLD';
+
+export interface CounterBasketQueueItem {
+  id: string;
+  queueNumber: number; // e.g. 102, 104, 105
+  queueToken: string; // e.g. "Q-104"
+  clerkName: string;
+  createdAt: string; // ISO
+  patientName: string;
+  patientPhone: string;
+  patientGhanaCard?: string;
+  schemeType: 'CASH' | 'NHIS' | 'PRIVATE_INSURANCE';
+  insuranceProviderName?: string;
+  insurancePolicyNumber?: string;
+  items: BasketItemWithUnit[];
+  clerkNotes?: string;
+  status: QueueBasketStatus;
+  rejectionReason?: string;
+  targetLane: PosLaneType;
+  containsClassA: boolean;
+  controlledDrugName?: string;
+  controlledDrugDoctorMdc?: string;
+  controlledDrugPatientId?: string;
+  prescriptionDetails?: PrescriptionDetails;
+  pharmacistReview?: {
+    reviewedBy: string;
+    reviewedAt: string;
+    gphcPin: string;
+    clinicalApproved: boolean;
+    doctorMdcNumber?: string;
+    overrideReason?: string;
+    itemBillingMatrix: Array<{
+      drugId: string;
+      drugName: string;
+      basePrice: number;
+      insurerPays: number;
+      patientCopay: number;
+      status: 'APPROVED' | 'OVERRIDE_APPROVED' | 'DENIED_CASH';
+    }>;
+    totalBasePrice: number;
+    totalInsurerPays: number;
+    totalPatientCopay: number;
+  };
+  cashierPayment?: {
+    cashierName: string;
+    paymentMethod: 'cash' | 'momo' | 'ghqr';
+    momoDetails?: {
+      provider: MomoProvider;
+      phone: string;
+      stkStatus: 'IDLE' | 'PENDING_STK' | 'APPROVED' | 'FAILED';
+      momoTransactionId?: string;
+    };
+    cashDetails?: {
+      tendered: number;
+      change: number;
+    };
+    graInvoiceNumber?: string;
+    graQrCodeString?: string;
+    completedAt?: string;
+  };
+}
+
+export interface PurchaseOrderItem {
+  drugId: string;
+  drugName: string;
+  brandName: string;
+  requestedQuantityPacks: number;
+  packSize: number;
+  unitCostGhs: number;
+  totalCostGhs: number;
+}
+
+export type PurchaseOrderStatus = 
+  | 'PENDING_OWNER_APPROVAL' 
+  | 'APPROVED_SENT_TO_SUPPLIER' 
+  | 'DELIVERED' 
+  | 'REJECTED';
+
+export interface PurchaseOrder {
+  id: string; // e.g. "PO-8902"
+  supplierName: string; // e.g. "Ernest Chemists Ltd"
+  supplierCode: string;
+  requestedBy: string;
+  createdAt: string;
+  items: PurchaseOrderItem[];
+  totalCostGhs: number;
+  requiresOwnerApproval: boolean;
+  thresholdGhs: number;
+  status: PurchaseOrderStatus;
+  ownerApprovalNotes?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+}
+
+export interface StaffPayrollRecord {
+  employeeId: string;
+  fullName: string;
+  role: 'Superintendent Pharmacist' | 'Counter Sales Clerk' | 'POS Cashier' | 'Dispensing Technician' | 'Inventory Officer';
+  phone: string;
+  momoNetwork: MomoProvider;
+  momoWalletNumber: string;
+  baseSalaryGhs: number;
+  ssnitEmployeeDeductionGhs: number; // 5.5%
+  ssnitEmployerContributionGhs: number; // 13.0%
+  taxableIncomeGhs: number; // Base - SSNIT Employee
+  graPayeTaxGhs: number; // Sliding scale GRA tax
+  netSalaryPayoutGhs: number; // Base - SSNIT 5.5% - PAYE
+  payoutStatus: 'PENDING' | 'QUEUED_MOMO' | 'PAID_MOMO';
+  payoutReference?: string;
+  payoutTimestamp?: string;
 }
 
 export interface PharmacyConfig {

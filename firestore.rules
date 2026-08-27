@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User profile documents
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (request.auth.uid == userId || request.resource.data.keys().hasAll(['email']));
+    }
+
+    // Transactions collection for sales and audits
+    match /transactions/{transactionId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Pharmacy active queue
+    match /pharmacy_queues/{queueId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Work focus music tracks and preferences
+    match /work_music_tracks/{trackId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // System configurations & sync state
+    match /system_configs/{configId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Fallback for app collections
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

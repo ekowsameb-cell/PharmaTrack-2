@@ -1,80 +1,40 @@
 import React, { useState, useMemo } from 'react';
 import { 
   FileText, 
-  Download, 
   Building2, 
-  CheckCircle2, 
-  Clock, 
-  DollarSign, 
-  Search, 
-  Filter, 
-  Plus, 
   ChevronRight,
   ExternalLink,
   ShieldCheck,
   AlertCircle
 } from 'lucide-react';
-import { TransactionRecord, PrivateInsurer, PharmacyConfig, NhisClaimBatchItem } from '../types/pharmacy';
-import { generateNhisGFormBatch, exportGFormCsv } from '../services/nhisService';
+import { TransactionRecord, PrivateInsurer, PharmacyConfig } from '../types/pharmacy';
+import { GFormReportGenerator } from './GFormReportGenerator';
 
 interface NhisDebtorLedgerProps {
   transactions: TransactionRecord[];
   insurers: PrivateInsurer[];
   onUpdateInsurer: (insurer: PrivateInsurer) => void;
   config: PharmacyConfig;
+  onAuditLogUpdate?: () => void;
 }
 
 export const NhisDebtorLedger: React.FC<NhisDebtorLedgerProps> = ({
   transactions,
   insurers,
   onUpdateInsurer,
-  config
+  config,
+  onAuditLogUpdate
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'nhis_gform' | 'private_debtors'>('nhis_gform');
-  const [claimSearch, setClaimSearch] = useState('');
   const [selectedInsurerForPayment, setSelectedInsurerForPayment] = useState<PrivateInsurer | null>(null);
   const [remittanceAmount, setRemittanceAmount] = useState<number>(0);
   const [remittanceRef, setRemittanceRef] = useState('');
-
-  // Extract NHIS Claims
-  const nhisClaims = useMemo(() => {
-    return generateNhisGFormBatch(transactions);
-  }, [transactions]);
-
-  const filteredClaims = useMemo(() => {
-    return nhisClaims.filter(c => 
-      c.patientName.toLowerCase().includes(claimSearch.toLowerCase()) ||
-      c.nhisNumber.includes(claimSearch) ||
-      c.drugName.toLowerCase().includes(claimSearch.toLowerCase()) ||
-      c.claimId.toLowerCase().includes(claimSearch.toLowerCase())
-    );
-  }, [nhisClaims, claimSearch]);
-
-  const nhisTotals = useMemo(() => {
-    const totalClaimsGhs = nhisClaims.reduce((sum, c) => sum + c.totalClaimGhs, 0);
-    const totalCopayGhs = nhisClaims.reduce((sum, c) => sum + c.copayPaidGhs, 0);
-    return { totalClaimsGhs, totalCopayGhs, count: nhisClaims.length };
-  }, [nhisClaims]);
 
   const privateDebtorTotals = useMemo(() => {
     const totalReceivable = insurers.reduce((sum, i) => sum + i.outstandingBalance, 0);
     const totalClaims = insurers.reduce((sum, i) => sum + i.claimsCount, 0);
     return { totalReceivable, totalClaims };
   }, [insurers]);
-
-  const handleExportCsv = () => {
-    if (nhisClaims.length === 0) {
-      alert('No NHIS claims available to export.');
-      return;
-    }
-    const csvContent = exportGFormCsv(nhisClaims, config.nhiaFacilityCode);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `NHIS_GForm_Batch_${config.nhiaFacilityCode}_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-  };
 
   const handleApplyRemittance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,7 +56,7 @@ export const NhisDebtorLedger: React.FC<NhisDebtorLedgerProps> = ({
   return (
     <div className="space-y-5 animate-fadeIn">
       {/* Sub-Tab Navigation Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
         <div className="flex items-center gap-2">
           <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex gap-1">
             <button
@@ -108,7 +68,7 @@ export const NhisDebtorLedger: React.FC<NhisDebtorLedgerProps> = ({
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>NHIS G-Form Claims Batch ({nhisClaims.length})</span>
+              <span>G-Form Claims Report Generator</span>
             </button>
 
             <button
@@ -125,132 +85,18 @@ export const NhisDebtorLedger: React.FC<NhisDebtorLedgerProps> = ({
           </div>
         </div>
 
-        {activeSubTab === 'nhis_gform' && (
-          <button
-            onClick={handleExportCsv}
-            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow transition-all"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export NHIA G-Form CSV</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+          <span>NHIA Facility ID: <strong className="text-emerald-400">{config.nhiaFacilityCode}</strong></span>
+        </div>
       </div>
 
-      {/* VIEW 1: NHIS G-FORM BATCH CLAIMS */}
+      {/* VIEW 1: NHIS G-FORM REPORT GENERATOR & PRE-SUBMISSION BATCH */}
       {activeSubTab === 'nhis_gform' && (
-        <div className="space-y-4">
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-              <span className="text-[11px] text-slate-400 font-semibold block uppercase">Total G-Form Claims</span>
-              <span className="text-xl font-bold font-mono text-slate-100">{nhisTotals.count} items</span>
-              <span className="text-[10px] text-slate-500 block">Facility: {config.nhiaFacilityCode}</span>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-              <span className="text-[11px] text-slate-400 font-semibold block uppercase">Gross NHIA Claim Value</span>
-              <span className="text-xl font-bold font-mono text-emerald-400">
-                GHS {nhisTotals.totalClaimsGhs.toFixed(2)}
-              </span>
-              <span className="text-[10px] text-slate-500 block">Tariff Subsidized</span>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-              <span className="text-[11px] text-slate-400 font-semibold block uppercase">Collected Patient Copay</span>
-              <span className="text-xl font-bold font-mono text-sky-400">
-                GHS {nhisTotals.totalCopayGhs.toFixed(2)}
-              </span>
-              <span className="text-[10px] text-slate-500 block">Non-covered &amp; Tariff diff</span>
-            </div>
-          </div>
-
-          {/* Search Bar */}
-          <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex items-center gap-3">
-            <Search className="w-4 h-4 text-slate-500 ml-2" />
-            <input
-              type="text"
-              placeholder="Search claims by patient name, NHIS number, drug description, claim ID..."
-              value={claimSearch}
-              onChange={(e) => setClaimSearch(e.target.value)}
-              className="w-full bg-transparent border-0 text-xs sm:text-sm text-slate-200 focus:outline-none placeholder:text-slate-500"
-            />
-          </div>
-
-          {/* NHIS Claims Table */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-lg">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold uppercase tracking-wider text-[10px]">
-                    <th className="p-3.5">Claim ID &amp; Date</th>
-                    <th className="p-3.5">Patient / NHIS Card</th>
-                    <th className="p-3.5">Prescriber &amp; Diagnosis</th>
-                    <th className="p-3.5">Drug &amp; NHIS Code</th>
-                    <th className="p-3.5 text-center">Qty</th>
-                    <th className="p-3.5 text-right">Tariff Unit</th>
-                    <th className="p-3.5 text-right">Claim Amount</th>
-                    <th className="p-3.5 text-center">Audit Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80">
-                  {filteredClaims.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="p-8 text-center text-slate-500">
-                        No NHIS claim records generated yet. Perform a checkout using NHIS profile in POS to populate.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredClaims.map((claim) => (
-                      <tr key={claim.claimId} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5">
-                          <div className="font-mono font-bold text-slate-200">{claim.claimId}</div>
-                          <div className="text-[10px] text-slate-500">{claim.dispenseDate}</div>
-                        </td>
-
-                        <td className="p-3.5">
-                          <div className="font-bold text-slate-100">{claim.patientName}</div>
-                          <div className="font-mono text-emerald-400 text-[11px]">{claim.nhisNumber}</div>
-                          <span className="text-[9px] bg-slate-800 text-slate-400 px-1 rounded">
-                            {claim.nhisCategory}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5">
-                          <div className="text-slate-300">{claim.prescriberName}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">{claim.prescriberMdcNumber}</div>
-                          <div className="text-[10px] text-slate-400">{claim.diagnosisCode}</div>
-                        </td>
-
-                        <td className="p-3.5">
-                          <div className="font-semibold text-slate-200">{claim.drugName}</div>
-                          <div className="text-[10px] font-mono text-slate-500">{claim.nhisDrugCode}</div>
-                        </td>
-
-                        <td className="p-3.5 text-center font-mono font-bold text-slate-200">
-                          {claim.quantityDispensed}
-                        </td>
-
-                        <td className="p-3.5 text-right font-mono text-slate-400">
-                          GHS {claim.unitTariffGhs.toFixed(2)}
-                        </td>
-
-                        <td className="p-3.5 text-right font-mono font-bold text-emerald-400">
-                          GHS {claim.totalClaimGhs.toFixed(2)}
-                        </td>
-
-                        <td className="p-3.5 text-center">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                            {claim.status.replace('_', ' ')}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <GFormReportGenerator
+          transactions={transactions}
+          config={config}
+          onAuditLogUpdate={onAuditLogUpdate}
+        />
       )}
 
       {/* VIEW 2: PRIVATE INSURERS DEBTOR LEDGERS */}
@@ -411,3 +257,4 @@ export const NhisDebtorLedger: React.FC<NhisDebtorLedgerProps> = ({
     </div>
   );
 };
+
