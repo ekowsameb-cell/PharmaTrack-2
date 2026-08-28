@@ -25,9 +25,44 @@ const STORAGE_KEYS = {
   OFFLINE_QUEUE: 'pharmatrack_gh_offline_queue_v1'
 };
 
+// Safe serialization helper that avoids circular references and strips non-serializable objects
+export const safeStringify = (data: unknown): string => {
+  try {
+    return JSON.stringify(data);
+  } catch (err) {
+    const seen = new WeakSet();
+    return JSON.stringify(data, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (value instanceof Event || ('nativeEvent' in value && 'target' in value)) {
+          return '[ReactSyntheticEvent]';
+        }
+        if (typeof Element !== 'undefined' && value instanceof Element) {
+          return `[DOMElement:${value.tagName}]`;
+        }
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+  }
+};
+
+const toSafeString = (val: unknown): string | undefined => {
+  if (val === undefined || val === null) return undefined;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean' || typeof val === 'bigint') return String(val);
+  try {
+    return safeStringify(val);
+  } catch {
+    return String(val);
+  }
+};
+
 // Cryptographic hash calculation for tamper-proof audit records
 export const computeRecordHash = (data: object, previousHash: string = 'GENESIS_HASH'): string => {
-  const serialized = JSON.stringify(data) + previousHash;
+  const serialized = safeStringify(data) + previousHash;
   let hash = 0;
   for (let i = 0; i < serialized.length; i++) {
     const char = serialized.charCodeAt(i);
@@ -191,15 +226,15 @@ export const logAuditEvent = (
   const entry: AuditLog = {
     id: `AUD-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
     timestamp: new Date().toISOString(),
-    userId: options.userId || 'USER-STAFF-01',
-    userName: options.userName || 'Dispensing Pharmacist / Cashier',
-    role: options.role || 'Pharmacist',
-    action,
+    userId: toSafeString(options.userId) || 'USER-STAFF-01',
+    userName: toSafeString(options.userName) || 'Dispensing Pharmacist / Cashier',
+    role: toSafeString(options.role) || 'Pharmacist',
+    action: toSafeString(action) || 'System Audit Action',
     module,
-    entityId: options.entityId,
-    fieldName: options.fieldName,
-    oldValue: options.oldValue,
-    newValue: options.newValue,
+    entityId: toSafeString(options.entityId),
+    fieldName: toSafeString(options.fieldName),
+    oldValue: toSafeString(options.oldValue),
+    newValue: toSafeString(options.newValue),
     ipDeviceId: 'POS-TERMINAL-01 (192.168.1.104)',
     hash: ''
   };
@@ -207,7 +242,11 @@ export const logAuditEvent = (
   entry.hash = computeRecordHash(entry, lastHash);
   
   const updatedLogs = [entry, ...currentLogs];
-  localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(updatedLogs));
+  try {
+    localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, safeStringify(updatedLogs));
+  } catch (err) {
+    console.error('Failed to save audit logs to localStorage:', err);
+  }
   return entry;
 };
 

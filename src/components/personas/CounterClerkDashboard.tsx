@@ -1,36 +1,48 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Search, 
+  Barcode, 
   ShoppingCart, 
-  MapPin, 
-  AlertCircle, 
-  CheckCircle2, 
-  Send, 
+  UserCheck, 
   Plus, 
   Minus, 
   Trash2, 
+  AlertOctagon, 
   Sparkles, 
-  ShieldAlert, 
-  Clock, 
-  Package, 
-  Layers, 
-  User, 
-  Phone, 
+  ArrowRight,
+  Stethoscope,
+  ShoppingBag,
+  Clock,
+  ShieldAlert,
+  CreditCard,
+  Building,
+  Check,
+  ChevronDown,
+  Layers,
+  MapPin,
+  Send,
+  User,
+  Phone,
   FileText,
   Boxes,
-  LogOut
+  Split,
+  LogOut,
+  SlidersHorizontal
 } from 'lucide-react';
 import { 
   DrugItem, 
   DrugBatch, 
-  BasketItemWithUnit, 
-  CounterBasketQueueItem, 
-  UnitSaleType,
-  PatientProfile,
+  CartItem, 
+  PosLaneType, 
+  PatientProfile, 
+  PrescriptionDetails,
   PharmacyConfig,
+  CounterBasketQueueItem,
+  UnitSaleType,
   UserRole
 } from '../../types/pharmacy';
 import { evaluateExpiryStatus } from '../../services/storageService';
+import { isClassAControlledDrug } from '../../services/ddrService';
 import { useRoleGuard } from '../../hooks/useRoleGuard';
 
 interface CounterClerkDashboardProps {
@@ -40,6 +52,17 @@ interface CounterClerkDashboardProps {
   onAddToQueue: (basket: CounterBasketQueueItem) => void;
   config: PharmacyConfig;
   currentUserRole?: UserRole | string;
+  cart: CartItem[];
+  setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  currentLane: PosLaneType;
+  setCurrentLane: (lane: PosLaneType) => void;
+  selectedPatient: PatientProfile | null;
+  setSelectedPatient: (patient: PatientProfile | null) => void;
+  prescription: PrescriptionDetails;
+  setPrescription: React.Dispatch<React.SetStateAction<PrescriptionDetails>>;
+  useNhisTariff: boolean;
+  setUseNhisTariff: (useNhis: boolean) => void;
+  onProceedToSplitCheckout: () => void;
   onLogout?: () => void;
 }
 
@@ -50,140 +73,209 @@ export const CounterClerkDashboard: React.FC<CounterClerkDashboardProps> = ({
   onAddToQueue,
   config,
   currentUserRole = 'Clerk',
+  cart,
+  setCart,
+  currentLane,
+  setCurrentLane,
+  selectedPatient,
+  setSelectedPatient,
+  prescription,
+  setPrescription,
+  useNhisTariff,
+  setUseNhisTariff,
+  onProceedToSplitCheckout,
   onLogout
 }) => {
   const roleGuard = useRoleGuard(currentUserRole);
-  // Clerk State
   const clerkName = 'Kwame Mensah (Counter Sales Assistant)';
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  
+  // UI & Filter States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [barcodeInput, setBarcodeInput] = useState('');
   const [activeSaleUnit, setActiveSaleUnit] = useState<Record<string, UnitSaleType>>({});
-  const [activeBasket, setActiveBasket] = useState<BasketItemWithUnit[]>([]);
   const [clerkNotes, setClerkNotes] = useState<string>('');
-  const [patientName, setPatientName] = useState<string>('Walk-in Customer');
-  const [patientPhone, setPatientPhone] = useState<string>('0244000000');
-  const [schemeType, setSchemeType] = useState<'CASH' | 'NHIS' | 'PRIVATE_INSURANCE'>('CASH');
-  const [insuranceProvider, setInsuranceProvider] = useState<string>('Nationwide Medical Insurance');
-  const [insurancePolicyNumber, setInsurancePolicyNumber] = useState<string>('');
-  const [lastSentToken, setLastSentToken] = useState<string | null>(null);
+  const [lastQueuedToken, setLastQueuedToken] = useState<string | null>(null);
 
   // Search input ref for hotkey focus
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Hotkey listener (Ctrl + / or / to focus search, F2 to Stage Order)
+  // Categories list
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    drugs.forEach(d => set.add(d.category));
+    return ['ALL', ...Array.from(set)];
+  }, [drugs]);
+
+  // Filtered drugs
+  const filteredDrugs = useMemo(() => {
+    return drugs.filter(d => {
+      const matchesSearch = 
+        d.brandName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        d.genericName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        d.barcode.includes(searchQuery) ||
+        (d.nhisCode && d.nhisCode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        d.batches.some(b => b.location.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      const matchesCat = selectedCategory === 'ALL' || d.category === selectedCategory;
+      return matchesSearch && matchesCat;
+    });
+  }, [drugs, searchQuery, selectedCategory]);
+
+  // Hotkey listener (Ctrl + / or / to focus search, F2 to Stage, F4 for Split Bill)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey && e.key === '/') || (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA')) {
         e.preventDefault();
         searchInputRef.current?.focus();
       }
-      // F2 -> Stage Order for Dispensary
-      if (e.key === 'F2' && activeBasket.length > 0) {
+      // F4 -> Split Billing Checkout
+      if (e.key === 'F4' && cart.length > 0) {
         e.preventDefault();
-        handleStageOrder();
+        onProceedToSplitCheckout();
+      }
+      // F2 -> Stage Order for Dispensary
+      if (e.key === 'F2' && cart.length > 0) {
+        e.preventDefault();
+        handleStageToQueue();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeBasket, patientName, patientPhone, schemeType, clerkNotes]);
+  }, [cart, onProceedToSplitCheckout]);
 
-  // Filtered drugs for Read-Only Inventory lookup
-  const filteredDrugs = drugs.filter((d) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      d.brandName.toLowerCase().includes(q) ||
-      d.genericName.toLowerCase().includes(q) ||
-      d.category.toLowerCase().includes(q) ||
-      d.barcode.includes(q) ||
-      d.batches.some(b => b.location.toLowerCase().includes(q))
-    );
-  }).slice(0, 10);
+  // Add Item with strict FEFO Picking & Unit Sale calculation
+  const handleAddToCart = (drug: DrugItem, specificBatch?: DrugBatch) => {
+    // Sort batches by FEFO (earliest expiry first)
+    const sortedBatches = [...drug.batches]
+      .filter(b => b.quantity > 0)
+      .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
 
-  const handleAddItemToBasket = (drug: DrugItem) => {
-    // Select earliest expiry batch (FEFO)
-    const validBatches = [...drug.batches].filter(b => b.quantity > 0);
-    if (validBatches.length === 0) return;
-    
-    // Sort FEFO
-    validBatches.sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
-    const bestBatch = validBatches[0];
-    const expiryEval = evaluateExpiryStatus(bestBatch.expiryDate);
+    let batchToPick = specificBatch || sortedBatches[0];
 
+    if (!batchToPick) {
+      alert(`No stock batches available for ${drug.brandName}`);
+      return;
+    }
+
+    const expiryEval = evaluateExpiryStatus(batchToPick.expiryDate);
     if (expiryEval.isLocked) {
-      alert(`System Security Lock: Batch ${bestBatch.batchNumber} has expired or is in quarantine.`);
+      alert(`SYSTEM HARD LOCK: Batch ${batchToPick.batchNumber} has under 3 months to expiration (${batchToPick.expiryDate}). GPhC regulations prohibit dispensing this batch. Please select another batch or quarantine this stock.`);
       return;
     }
 
     const saleUnit = activeSaleUnit[drug.id] || 'box';
+    let basePrice = useNhisTariff && drug.nhisCovered ? drug.nhisTariffPrice : drug.retailPrice;
 
-    const existingIndex = activeBasket.findIndex(
-      (item) => item.drug.id === drug.id && item.saleUnit === saleUnit && item.selectedBatch.batchNumber === bestBatch.batchNumber
+    // Adjust unit price for fractional sales
+    if (saleUnit === 'strip') {
+      basePrice = parseFloat((basePrice / (drug.packSize > 1 ? 2 : 1)).toFixed(2));
+    } else if (saleUnit === 'tablet') {
+      basePrice = parseFloat((basePrice / (drug.packSize || 10)).toFixed(2));
+    }
+
+    // Check if already in cart with same batch and unit
+    const existingIndex = cart.findIndex(
+      item => item.drug.id === drug.id && item.selectedBatch.batchNumber === batchToPick.batchNumber
     );
 
-    if (existingIndex >= 0) {
-      const updated = [...activeBasket];
-      updated[existingIndex].quantity += 1;
-      setActiveBasket(updated);
-    } else {
-      const newItem: BasketItemWithUnit = {
-        id: `b-item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        drug,
-        selectedBatch: bestBatch,
-        quantity: 1,
-        saleUnit,
-        unitsPerPack: drug.packSize,
-        unitPriceGhs: drug.retailPrice, // Kept internal for payload only
-        totalPriceGhs: drug.retailPrice,
-        expirySafe: !expiryEval.isLocked,
-        expiryDate: bestBatch.expiryDate,
-        requiresDoctorMdc: drug.classification === 'ClassA_Controlled'
+    if (existingIndex > -1) {
+      const existing = cart[existingIndex];
+      if (existing.quantity + 1 > batchToPick.quantity) {
+        alert(`Cannot exceed available batch stock of ${batchToPick.quantity} units.`);
+        return;
+      }
+      const updated = [...cart];
+      updated[existingIndex] = {
+        ...existing,
+        quantity: existing.quantity + 1,
+        totalPrice: parseFloat(((existing.quantity + 1) * existing.unitPrice).toFixed(2))
       };
-      setActiveBasket([...activeBasket, newItem]);
+      setCart(updated);
+    } else {
+      const newItem: CartItem = {
+        drug,
+        selectedBatch: batchToPick,
+        quantity: 1,
+        unitPrice: basePrice,
+        dosageInstructions: currentLane === 'clinical' ? '1 tab TDS x 5 days after meals' : 'As directed on pack',
+        durationDays: 5,
+        totalPrice: basePrice,
+        isNhisTariff: useNhisTariff && drug.nhisCovered,
+        requiresSuperintendentAuth: isClassAControlledDrug(drug.classification)
+      };
+      setCart([...cart, newItem]);
     }
   };
 
-  const handleUpdateQuantity = (itemId: string, delta: number) => {
-    const updated = activeBasket
-      .map((item) => {
-        if (item.id === itemId) {
-          const newQty = Math.max(0, item.quantity + delta);
-          return {
-            ...item,
-            quantity: newQty,
-            totalPriceGhs: newQty * item.unitPriceGhs
-          };
-        }
-        return item;
-      })
-      .filter((item) => item.quantity > 0);
-    setActiveBasket(updated);
+  const handleUpdateQuantity = (index: number, delta: number) => {
+    const item = cart[index];
+    const newQty = item.quantity + delta;
+    if (newQty <= 0) {
+      setCart(cart.filter((_, i) => i !== index));
+      return;
+    }
+    if (newQty > item.selectedBatch.quantity) {
+      alert(`Only ${item.selectedBatch.quantity} available in batch ${item.selectedBatch.batchNumber}`);
+      return;
+    }
+    const updated = [...cart];
+    updated[index] = {
+      ...item,
+      quantity: newQty,
+      totalPrice: parseFloat((newQty * item.unitPrice).toFixed(2))
+    };
+    setCart(updated);
   };
 
-  const handleRemoveItem = (itemId: string) => {
-    setActiveBasket(activeBasket.filter((i) => i.id !== itemId));
+  const handleRemoveFromCart = (index: number) => {
+    setCart(cart.filter((_, i) => i !== index));
   };
 
-  const totalItemsCount = activeBasket.reduce((sum, item) => sum + item.quantity, 0);
-  const containsControlled = activeBasket.some((i) => i.drug.classification === 'ClassA_Controlled');
-
-  // Next Queue Number generator
-  const getNextQueueNumber = (): number => {
-    const highest = queue.reduce((max, q) => Math.max(max, q.queueNumber), 100);
-    return highest + 1;
+  const handleBarcodeScan = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!barcodeInput.trim()) return;
+    const found = drugs.find(d => d.barcode === barcodeInput.trim());
+    if (found) {
+      handleAddToCart(found);
+      setBarcodeInput('');
+    } else {
+      alert(`Barcode ${barcodeInput} not found in drug registry.`);
+    }
   };
 
-  // POST /api/v1/orders/stage simulation
-  const handleStageOrder = () => {
-    if (activeBasket.length === 0) return;
+  const cartTotal = useMemo(() => {
+    return cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  }, [cart]);
+
+  const hasControlledItemsInCart = useMemo(() => {
+    return cart.some(item => isClassAControlledDrug(item.drug.classification));
+  }, [cart]);
+
+  // Stage active cart to queue (POST /api/v1/orders/stage simulation)
+  const handleStageToQueue = () => {
+    if (cart.length === 0) return;
 
     roleGuard.verifyAction('STAGE_ORDER', () => {
-      const qNum = getNextQueueNumber();
+      const highest = queue.reduce((max, q) => Math.max(max, q.queueNumber), 100);
+      const qNum = highest + 1;
       const token = `Q-${qNum}`;
-
-      // Backend intercept rule:
-      // If is_controlled_class_a = TRUE or requires clinical clearance -> PENDING_CLINICAL_CLEARANCE
-      // Else stages as DRAFT / staged order for workflow
+      const containsControlled = hasControlledItemsInCart;
       const targetStatus = containsControlled ? 'PENDING_CLINICAL_CLEARANCE' : 'DRAFT';
+
+      const basketItems = cart.map(item => ({
+        id: `b-item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        drug: item.drug,
+        selectedBatch: item.selectedBatch,
+        quantity: item.quantity,
+        saleUnit: activeSaleUnit[item.drug.id] || 'box',
+        unitsPerPack: item.drug.packSize,
+        unitPriceGhs: item.unitPrice,
+        totalPriceGhs: item.totalPrice,
+        expirySafe: true,
+        expiryDate: item.selectedBatch.expiryDate,
+        requiresDoctorMdc: isClassAControlledDrug(item.drug.classification)
+      }));
 
       const newQueueItem: CounterBasketQueueItem = {
         id: `queue-${qNum}-${Date.now()}`,
@@ -191,87 +283,92 @@ export const CounterClerkDashboard: React.FC<CounterClerkDashboardProps> = ({
         queueToken: token,
         clerkName,
         createdAt: new Date().toISOString(),
-        patientName: patientName.trim() || 'Walk-In Customer',
-        patientPhone: patientPhone.trim() || '0244000000',
-        schemeType,
-        insuranceProviderName: schemeType === 'PRIVATE_INSURANCE' ? insuranceProvider : undefined,
-        insurancePolicyNumber: schemeType !== 'CASH' ? insurancePolicyNumber : undefined,
-        items: [...activeBasket],
+        patientName: selectedPatient ? selectedPatient.fullName : 'Walk-in Customer',
+        patientPhone: selectedPatient ? selectedPatient.phone : '0244000000',
+        schemeType: currentLane === 'clinical' && selectedPatient?.nhisNumber ? 'NHIS' : selectedPatient?.privateInsuranceProvider ? 'PRIVATE_INSURANCE' : 'CASH',
+        insuranceProviderName: selectedPatient?.privateInsuranceProvider || undefined,
+        insurancePolicyNumber: selectedPatient?.nhisNumber || undefined,
+        items: basketItems,
         clerkNotes: clerkNotes.trim() || undefined,
         status: targetStatus,
-        targetLane: containsControlled ? 'clinical' : 'retail',
+        targetLane: currentLane,
         containsClassA: containsControlled,
         controlledDrugName: containsControlled 
-          ? activeBasket.find(i => i.drug.classification === 'ClassA_Controlled')?.drug.brandName 
+          ? cart.find(i => isClassAControlledDrug(i.drug.classification))?.drug.brandName 
           : undefined
       };
 
       onAddToQueue(newQueueItem);
-      setLastSentToken(token);
-      setActiveBasket([]);
+      setLastQueuedToken(token);
+      setCart([]);
       setClerkNotes('');
-      setPatientName('Walk-in Customer');
-      setPatientPhone('0244000000');
     });
   };
 
   return (
     <div className="space-y-4">
-      {/* Top Banner: Clerk Role - Strict Read-Only Inventory & Staging */}
+      {/* Top Station Header: Dual-Zone Counter POS Status Bar */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/40 text-sky-400 flex items-center justify-center font-bold">
-            <User className="w-5 h-5" />
+            <ShoppingCart className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-slate-100">Counter Clerk Dashboard</h2>
+              <h2 className="text-base font-bold text-slate-100">Dual-Zone Counter POS</h2>
+              <span className="bg-emerald-950 text-emerald-300 border border-emerald-800/80 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
+                <Split className="w-3 h-3" /> Bill Split Enabled
+              </span>
               <span className="bg-sky-950 text-sky-300 border border-sky-800/80 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
-                Inventory Lookup & Order Staging
+                Station #01
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Assigned User: <strong className="text-slate-200">{clerkName}</strong> • Station #01 (Non-Financial View)
+              Staff: <strong className="text-slate-200">{clerkName}</strong> • {currentLane === 'retail' ? 'Zone 1: OTC Fast-Lane' : 'Zone 2: Clinical Rx Lane'}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 text-xs flex-wrap">
+          {/* Active Queue Counter */}
           <div className="bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
             <Clock className="w-3.5 h-3.5 text-sky-400" />
-            <span className="text-slate-400">Active Dispensary Queues:</span>
+            <span className="text-slate-400">Dispensary Queues:</span>
             <span className="font-mono font-bold text-slate-100">{queue.length}</span>
           </div>
 
-          <div className="bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-            <span className="text-slate-400">Quick Stage:</span>
-            <span className="font-mono text-sky-300 font-semibold bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/60">F2</span>
+          {/* Quick Hotkeys Indicator */}
+          <div className="bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2 text-slate-400">
+            <span>Hotkeys:</span>
+            <span className="font-mono text-sky-300 font-semibold bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/60">Ctrl + /</span>
+            <span>Search</span>
+            <span className="font-mono text-emerald-300 font-semibold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">F4</span>
+            <span>Split Bill</span>
           </div>
 
           {onLogout && (
             <button
               onClick={onLogout}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 hover:bg-rose-950/80 text-rose-300 hover:text-rose-200 border border-slate-800 hover:border-rose-700/80 rounded-xl text-xs font-bold transition-all shadow-sm group"
-              title="Log out and exit counter clerk station"
+              title="Log out and exit counter station"
             >
               <LogOut className="w-3.5 h-3.5 text-rose-400 group-hover:translate-x-0.5 transition-transform" />
-              <span>Exit Dashboard</span>
+              <span>Exit POS</span>
             </button>
           )}
         </div>
       </div>
 
-      {lastSentToken && (
+      {lastQueuedToken && (
         <div className="bg-emerald-950/60 border border-emerald-700/60 rounded-2xl p-3.5 flex items-center justify-between text-xs text-emerald-300 animate-fadeIn">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              Order successfully staged via <code>POST /api/v1/orders/stage</code>. Token assigned: <strong>{lastSentToken}</strong>
+              Order successfully staged to Dispensary Queue! Token assigned: <strong>{lastQueuedToken}</strong>
             </span>
           </div>
           <button 
-            onClick={() => setLastSentToken(null)}
+            onClick={() => setLastQueuedToken(null)}
             className="text-emerald-400 hover:text-emerald-200 font-bold ml-2 underline"
           >
             Dismiss
@@ -279,392 +376,548 @@ export const CounterClerkDashboard: React.FC<CounterClerkDashboardProps> = ({
         </div>
       )}
 
-      {/* Main Grid: Left Side Read-Only Stock Lookup | Right Side Staging Basket */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left Column: Read-Only Inventory Search & Physical Coordinates (7 Cols) */}
+      {/* Main Dual-Zone Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* LEFT COLUMN: Dual-Zone Switcher, Search, and Catalog (7 Cols) */}
         <div className="lg:col-span-7 space-y-4">
-          {/* Quick Search Input */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3 shadow-md">
-            <div className="relative">
-              <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="[ SEARCH INVENTORY: Generic Name, Brand Name, or Shelf Location (Ctrl + /) ]"
-                className="w-full pl-11 pr-24 py-3 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-medium"
-              />
-              {searchQuery && (
+          {/* Dual Zone Selector & NHIS Tariff Toggle */}
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">POS Zone:</span>
+              <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex gap-1">
                 <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2 py-1 rounded-lg"
+                  onClick={() => setCurrentLane('retail')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    currentLane === 'retail'
+                      ? 'bg-sky-500 text-slate-950 shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
                 >
-                  Clear
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>Zone 1: OTC Fast-Lane</span>
                 </button>
-              )}
+                <button
+                  onClick={() => setCurrentLane('clinical')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    currentLane === 'clinical'
+                      ? 'bg-emerald-500 text-slate-950 shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Stethoscope className="w-3.5 h-3.5" />
+                  <span>Zone 2: Clinical Rx Lane</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-              <span>Read-Only Inventory Availability • Generic & Brand Mapping • Physical Shelf Coordinates</span>
-              <span className="text-[11px] font-mono text-slate-500">{filteredDrugs.length} items</span>
+            {/* NHIS Medicines Fixed Tariff Toggle */}
+            <div className="flex items-center gap-2 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold">
+                <input
+                  type="checkbox"
+                  checked={useNhisTariff}
+                  onChange={(e) => setUseNhisTariff(e.target.checked)}
+                  className="w-4 h-4 rounded text-emerald-500 bg-slate-900 border-slate-700 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                />
+                <span className={useNhisTariff ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                  NHIS Medicines Tariff
+                </span>
+              </label>
             </div>
           </div>
 
-          {/* Stock Lookup Results Table - Stripped of Financial/GHS values */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-md">
-            <div className="px-4 py-3 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                <Package className="w-4 h-4 text-sky-400" />
-                Products Query (Generic Name / Brand / Shelf / Stock)
-              </h3>
-              <span className="text-[10px] text-slate-400">Select dispensing unit and pull to staging basket</span>
+          {/* Clinical Prescription Patient Profile & Prescriber Header (Visible in Clinical Zone) */}
+          {currentLane === 'clinical' && (
+            <div className="bg-emerald-950/30 border border-emerald-800/40 p-4 rounded-2xl space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Patient Profile & Prescriber Linkage</span>
+                </div>
+                <span className="text-[11px] bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded border border-emerald-700/50">
+                  GPhC Clinical Audit Mandate
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Patient Selector */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Select Patient (Ghana Card / NHIS Verified)
+                  </label>
+                  <select
+                    value={selectedPatient?.id || ''}
+                    onChange={(e) => {
+                      const pat = patients.find(p => p.id === e.target.value) || null;
+                      setSelectedPatient(pat);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="">-- Choose Registered Patient --</option>
+                    {patients.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.fullName} ({p.nationalId}) - {p.nhisNumber || 'Private'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Prescriber Name & MDC Number */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Prescribing Doctor & MDC Reg No.
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Dr. K. Appiah (MDC/RN/48201)"
+                    value={prescription.prescriberName}
+                    onChange={(e) => setPrescription({ ...prescription, prescriberName: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {selectedPatient && (
+                <div className="bg-slate-950/60 p-2.5 rounded-xl text-xs flex flex-wrap items-center gap-4 text-slate-300 border border-slate-800/80">
+                  <div>
+                    <span className="text-slate-500">NHIS No: </span>
+                    <span className="font-mono font-bold text-emerald-400">{selectedPatient.nhisNumber || 'None'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Status: </span>
+                    <span className="text-emerald-400 font-bold">{selectedPatient.nhisStatus}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Private Ins: </span>
+                    <span className="text-slate-200 font-semibold">{selectedPatient.privateInsuranceProvider || 'None'}</span>
+                  </div>
+                  {selectedPatient.allergies && selectedPatient.allergies.length > 0 && (
+                    <div className="text-rose-400 font-bold flex items-center gap-1">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      <span>Allergies: {selectedPatient.allergies.join(', ')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Search Bar & Barcode Scanner */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Text Search */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search Brand, Generic Name, Barcode, Shelf Location (Ctrl + /)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs sm:text-sm text-slate-200 focus:outline-none focus:border-sky-500 placeholder:text-slate-500"
+              />
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/40 text-slate-400 font-semibold">
-                    <th className="py-2.5 px-3">Generic Name & Strength</th>
-                    <th className="py-2.5 px-3">Brand Name</th>
-                    <th className="py-2.5 px-3">Unit Selection</th>
-                    <th className="py-2.5 px-3">Available Quantity</th>
-                    <th className="py-2.5 px-3">Physical Shelf / Drawer</th>
-                    <th className="py-2.5 px-3 text-center">Stage</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {filteredDrugs.map((drug) => {
-                    const currentUnit = activeSaleUnit[drug.id] || 'box';
-                    const totalUnits = drug.batches.reduce((sum, b) => sum + b.quantity, 0);
-                    const primaryBatch = drug.batches[0];
-                    const shelfLocation = primaryBatch?.location || 'Main Storage Rack';
-                    const isOutOfStock = totalUnits <= 0;
-                    const isControlled = drug.classification === 'ClassA_Controlled';
+            {/* Quick Barcode Scanner Input */}
+            <form onSubmit={handleBarcodeScan} className="flex gap-2">
+              <div className="relative">
+                <Barcode className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Scan barcode..."
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  className="w-36 pl-8 pr-2 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-sky-500 font-mono"
+                />
+              </div>
+              <button
+                type="submit"
+                className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition-colors"
+              >
+                Scan
+              </button>
+            </form>
+          </div>
 
-                    return (
-                      <tr 
-                        key={drug.id}
-                        className={`hover:bg-slate-800/50 transition-colors ${
-                          isControlled ? 'bg-amber-950/10' : ''
-                        }`}
-                      >
-                        <td className="py-2.5 px-3">
-                          <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                            {drug.genericName} {drug.strength}
-                            {isControlled && (
-                              <span className="bg-amber-950 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded border border-amber-800/80">
-                                Controlled (Class A)
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-slate-400">{drug.category}</span>
-                        </td>
+          {/* Category Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium transition-all ${
+                  selectedCategory === cat
+                    ? 'bg-sky-950 text-sky-400 border border-sky-700/60'
+                    : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
 
-                        <td className="py-2.5 px-3">
-                          <span className="text-slate-200 font-medium">{drug.brandName}</span>
-                          <span className="text-[10px] text-slate-500 block">Pack of {drug.packSize}</span>
-                        </td>
+          {/* Drug Catalog List with Shelf Coordinates & Unit Toggles */}
+          <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+            {filteredDrugs.length === 0 ? (
+              <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-8 text-center text-slate-500">
+                <AlertOctagon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p>No pharmaceutical items match "{searchQuery}"</p>
+              </div>
+            ) : (
+              filteredDrugs.map(drug => {
+                const totalStock = drug.batches.reduce((s, b) => s + b.quantity, 0);
+                const sortedValidBatches = [...drug.batches]
+                  .filter(b => b.quantity > 0)
+                  .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
+                const earliestBatch = sortedValidBatches[0];
+                const expiryEval = earliestBatch ? evaluateExpiryStatus(earliestBatch.expiryDate) : null;
+                const isControlled = isClassAControlledDrug(drug.classification);
+                const currentUnit = activeSaleUnit[drug.id] || 'box';
+                const shelfLocation = earliestBatch?.location || 'Main Storage Rack';
+
+                return (
+                  <div
+                    key={drug.id}
+                    className={`bg-slate-900 border transition-all rounded-2xl p-3.5 ${
+                      isControlled
+                        ? 'border-purple-800/60 bg-purple-950/10 hover:border-purple-600'
+                        : 'border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-100 text-sm">{drug.brandName}</span>
+                          <span className="text-xs text-slate-400">{drug.strength}</span>
+                          <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">
+                            {drug.dosageForm}
+                          </span>
+
+                          {/* Physical Shelf Tag */}
+                          <span className="text-[10px] bg-slate-950 text-amber-300 border border-slate-800 px-1.5 py-0.5 rounded font-mono flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-amber-400" />
+                            {shelfLocation}
+                          </span>
+
+                          {isControlled && (
+                            <span className="text-[10px] font-bold bg-purple-900/80 text-purple-300 border border-purple-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <ShieldAlert className="w-3 h-3" /> Class A Controlled
+                            </span>
+                          )}
+
+                          {drug.nhisCovered && (
+                            <span className="text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded">
+                              NHIS Covered
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-xs text-slate-400 mt-1 truncate">
+                          {drug.genericName} • <span className="text-slate-500">{drug.category}</span>
+                        </div>
 
                         {/* Granular Unit Mode Selector (Box / Strip / Tablet) */}
-                        <td className="py-2.5 px-3">
-                          <div className="inline-flex rounded-lg border border-slate-700 p-0.5 bg-slate-950 text-[10px]">
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-[11px] text-slate-500 font-semibold">Unit:</span>
+                          <div className="inline-flex rounded-lg border border-slate-800 p-0.5 bg-slate-950 text-[10px]">
                             <button
                               type="button"
                               onClick={() => setActiveSaleUnit({ ...activeSaleUnit, [drug.id]: 'box' })}
-                              className={`px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
                                 currentUnit === 'box'
                                   ? 'bg-sky-500 text-slate-950 font-bold'
                                   : 'text-slate-400 hover:text-slate-200'
                               }`}
-                              title="Full Box"
                             >
-                              Box
+                              Full Pack
                             </button>
                             <button
                               type="button"
                               onClick={() => setActiveSaleUnit({ ...activeSaleUnit, [drug.id]: 'strip' })}
-                              className={`px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
                                 currentUnit === 'strip'
                                   ? 'bg-sky-500 text-slate-950 font-bold'
                                   : 'text-slate-400 hover:text-slate-200'
                               }`}
-                              title="Blister Strip"
                             >
-                              Strip
+                              Blister Strip
                             </button>
                             <button
                               type="button"
                               onClick={() => setActiveSaleUnit({ ...activeSaleUnit, [drug.id]: 'tablet' })}
-                              className={`px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
                                 currentUnit === 'tablet'
                                   ? 'bg-sky-500 text-slate-950 font-bold'
                                   : 'text-slate-400 hover:text-slate-200'
                               }`}
-                              title="Single Tablet / Unit"
                             >
-                              Tab
+                              Single Unit
                             </button>
                           </div>
-                        </td>
+                        </div>
 
-                        <td className="py-2.5 px-3">
-                          {isOutOfStock ? (
-                            <span className="text-red-400 font-bold font-mono">0 Available</span>
-                          ) : (
-                            <span className="font-mono font-bold text-emerald-400">
-                              {totalUnits} {currentUnit === 'box' ? 'Boxes' : currentUnit === 'strip' ? 'Strips' : 'Tabs'}
-                            </span>
-                          )}
-                        </td>
+                        {/* FEFO Batches Display */}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <span className="text-[11px] text-slate-500 font-semibold">FEFO Batches:</span>
+                          {drug.batches.map(batch => {
+                            const bEval = evaluateExpiryStatus(batch.expiryDate);
+                            return (
+                              <button
+                                key={batch.batchNumber}
+                                onClick={() => handleAddToCart(drug, batch)}
+                                disabled={bEval.isLocked || batch.quantity <= 0}
+                                className={`text-[11px] px-2 py-0.5 rounded-md font-mono flex items-center gap-1 transition-all border ${
+                                  batch.quantity <= 0
+                                    ? 'bg-slate-950 text-slate-600 border-slate-800 opacity-40 cursor-not-allowed'
+                                    : bEval.status === 'green'
+                                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800 hover:bg-emerald-900/60'
+                                    : bEval.status === 'yellow'
+                                    ? 'bg-amber-950/60 text-amber-300 border-amber-800 hover:bg-amber-900/60'
+                                    : 'bg-rose-950/60 text-rose-400 border-rose-800 opacity-60 cursor-not-allowed line-through'
+                                }`}
+                                title={`Batch ${batch.batchNumber} - Exp: ${batch.expiryDate} (${bEval.monthsRemaining} mo) - Qty: ${batch.quantity}`}
+                              >
+                                <span>{batch.batchNumber}</span>
+                                <span className="text-[9px] opacity-80">({batch.quantity})</span>
+                                {bEval.status === 'red' && <span className="text-[9px] font-bold">LOCK</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
 
-                        {/* Physical Shelf Coordinates */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex items-center gap-1.5 text-slate-300 font-mono text-[11px] bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800">
-                            <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
-                            <span className="truncate max-w-[140px]">{shelfLocation}</span>
+                      {/* Price and Add Button */}
+                      <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
+                        <div className="text-right">
+                          <div className="text-sm font-bold text-emerald-400 font-mono">
+                            GHS {(() => {
+                              let p = useNhisTariff && drug.nhisCovered ? drug.nhisTariffPrice : drug.retailPrice;
+                              if (currentUnit === 'strip') p = p / (drug.packSize > 1 ? 2 : 1);
+                              if (currentUnit === 'tablet') p = p / (drug.packSize || 10);
+                              return p.toFixed(2);
+                            })()}
                           </div>
-                        </td>
+                          {useNhisTariff && drug.nhisCovered && (
+                            <div className="text-[10px] text-slate-500 line-through">
+                              Retail: GHS {drug.retailPrice.toFixed(2)}
+                            </div>
+                          )}
+                        </div>
 
-                        <td className="py-2.5 px-3 text-center">
-                          <button
-                            type="button"
-                            disabled={isOutOfStock}
-                            onClick={() => handleAddItemToBasket(drug)}
-                            className={`p-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all mx-auto ${
-                              isOutOfStock
-                                ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                                : 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow'
-                            }`}
-                            title="Add item to staged order"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        <button
+                          onClick={() => handleAddToCart(drug)}
+                          disabled={totalStock <= 0 || (expiryEval && expiryEval.isLocked)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow ${
+                            expiryEval && expiryEval.isLocked
+                              ? 'bg-rose-950/80 text-rose-400 border border-rose-800 cursor-not-allowed'
+                              : totalStock <= 0
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                              : 'bg-sky-500 hover:bg-sky-400 text-slate-950'
+                          }`}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{expiryEval && expiryEval.isLocked ? 'Locked' : 'Add'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
-        {/* Right Column: Order Staging Tray & Patient Context (5 Cols) */}
+        {/* RIGHT COLUMN: Active POS Cart & Dual Checkout Options (5 Cols) */}
         <div className="lg:col-span-5 space-y-4">
-          {/* Patient Identification Card */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-md">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                <User className="w-4 h-4 text-sky-400" />
-                Customer & Patient Info
-              </h3>
-              <span className="text-[10px] text-slate-500 font-mono">Order Staging Form</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Customer / Patient Name</label>
-                <input
-                  type="text"
-                  value={patientName}
-                  onChange={(e) => setPatientName(e.target.value)}
-                  placeholder="e.g. Abena Osei"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 font-medium focus:outline-none focus:border-sky-500"
-                />
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg flex flex-col min-h-[580px]">
+            {/* Cart Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-emerald-400" />
+                <h2 className="font-bold text-slate-100 text-base">Counter POS Basket</h2>
+                <span className="bg-slate-800 text-slate-300 text-xs px-2 py-0.5 rounded-full font-mono">
+                  {cart.length} lines
+                </span>
               </div>
-
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Phone Number</label>
-                <input
-                  type="text"
-                  value={patientPhone}
-                  onChange={(e) => setPatientPhone(e.target.value)}
-                  placeholder="0244XXXXXX"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 font-mono focus:outline-none focus:border-sky-500"
-                />
-              </div>
-            </div>
-
-            {/* Scheme Type Selector for Staging Context */}
-            <div className="space-y-1.5 text-xs">
-              <label className="block text-[11px] text-slate-400">Coverage Scheme</label>
-              <div className="grid grid-cols-3 gap-1.5">
+              {cart.length > 0 && (
                 <button
-                  type="button"
-                  onClick={() => setSchemeType('CASH')}
-                  className={`py-1.5 rounded-xl font-bold text-[11px] border transition-all ${
-                    schemeType === 'CASH'
-                      ? 'bg-sky-500 text-slate-950 border-sky-400'
-                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                  }`}
+                  onClick={() => setCart([])}
+                  className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
                 >
-                  Direct / Cash
+                  Clear All
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSchemeType('NHIS')}
-                  className={`py-1.5 rounded-xl font-bold text-[11px] border transition-all ${
-                    schemeType === 'NHIS'
-                      ? 'bg-sky-500 text-slate-950 border-sky-400'
-                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  NHIS Scheme
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSchemeType('PRIVATE_INSURANCE')}
-                  className={`py-1.5 rounded-xl font-bold text-[11px] border transition-all ${
-                    schemeType === 'PRIVATE_INSURANCE'
-                      ? 'bg-sky-500 text-slate-950 border-sky-400'
-                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  Private Insurer
-                </button>
-              </div>
-
-              {schemeType === 'PRIVATE_INSURANCE' && (
-                <div className="pt-2 grid grid-cols-2 gap-2">
-                  <select
-                    value={insuranceProvider}
-                    onChange={(e) => setInsuranceProvider(e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 text-xs"
-                  >
-                    <option value="Nationwide Medical Insurance">Nationwide Health</option>
-                    <option value="Acacia Health Insurance">Acacia Health</option>
-                    <option value="Apex Health Insurance">Apex Health</option>
-                    <option value="Cosmopolitan Health Insurance">Cosmopolitan</option>
-                    <option value="Premier Health Insurance">Premier Health</option>
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Policy / Card Number"
-                    value={insurancePolicyNumber}
-                    onChange={(e) => setInsurancePolicyNumber(e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 text-xs font-mono"
-                  />
-                </div>
               )}
             </div>
-          </div>
 
-          {/* Staging Basket Tray */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-md">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                <Boxes className="w-4 h-4 text-sky-400" />
-                Staged Basket Items
-              </h3>
-              <span className="text-xs font-mono font-bold text-sky-400">
-                {activeBasket.length} Lines ({totalItemsCount} Total Units)
-              </span>
+            {/* Cart Items List */}
+            <div className="flex-1 overflow-y-auto my-3 space-y-3 pr-1 max-h-[340px]">
+              {cart.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center text-slate-500 px-4">
+                  <ShoppingBag className="w-12 h-12 mb-3 stroke-1 text-slate-600" />
+                  <p className="text-sm font-semibold">Counter basket is empty</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Scan a barcode or click '+ Add' on medications to build bill.
+                  </p>
+                </div>
+              ) : (
+                cart.map((item, idx) => {
+                  const isControlled = isClassAControlledDrug(item.drug.classification);
+                  return (
+                    <div
+                      key={`${item.drug.id}-${item.selectedBatch.batchNumber}-${idx}`}
+                      className={`bg-slate-950 p-3.5 rounded-2xl border ${
+                        isControlled ? 'border-purple-800/70 bg-purple-950/20' : 'border-slate-800/90'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-100 text-xs sm:text-sm">
+                              {item.drug.brandName}
+                            </span>
+                            {isControlled && (
+                              <span className="text-[9px] bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded font-bold">
+                                DDR
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span>Batch: <strong className="text-emerald-400 font-mono">{item.selectedBatch.batchNumber}</strong></span>
+                            <span>•</span>
+                            <span className="text-amber-300 font-mono flex items-center gap-0.5">
+                              <MapPin className="w-3 h-3 text-amber-400 inline" />
+                              {item.selectedBatch.location}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleRemoveFromCart(idx)}
+                          className="text-slate-500 hover:text-rose-400 p-1 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Quantity Controls & Price */}
+                      <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-900">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleUpdateQuantity(idx, -1)}
+                            className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 transition-colors"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="font-mono font-bold text-xs w-6 text-center text-slate-100">
+                            {item.quantity}
+                          </span>
+                          <button
+                            onClick={() => handleUpdateQuantity(idx, 1)}
+                            className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 transition-colors"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <span className="text-[11px] text-slate-500">@ GHS {item.unitPrice.toFixed(2)}</span>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="font-mono font-bold text-slate-100 text-xs sm:text-sm">
+                            GHS {item.totalPrice.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Dosage Instructions in Clinical Lane */}
+                      {currentLane === 'clinical' && (
+                        <div className="mt-2 text-[11px] bg-slate-900 p-1.5 rounded-lg text-slate-300 border border-slate-800">
+                          <span className="text-slate-500 font-semibold">Dosage: </span>
+                          <input
+                            type="text"
+                            value={item.dosageInstructions || ''}
+                            onChange={(e) => {
+                              const updated = [...cart];
+                              updated[idx].dosageInstructions = e.target.value;
+                              setCart(updated);
+                            }}
+                            placeholder="e.g. 1 tab TDS x 5 days after meals"
+                            className="bg-transparent border-0 text-[11px] text-emerald-300 focus:outline-none w-48 p-0"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            {activeBasket.length === 0 ? (
-              <div className="py-8 text-center text-slate-500 space-y-2">
-                <ShoppingCart className="w-8 h-8 mx-auto text-slate-600 opacity-50" />
-                <p className="text-xs">No medicines staged in current basket.</p>
-                <p className="text-[11px] text-slate-600">Search drugs on the left or press Ctrl + / to add</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
-                {activeBasket.map((item, idx) => (
-                  <div
-                    key={item.id}
-                    className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-slate-500 font-mono text-[10px]">{idx + 1}.</span>
-                        <h4 className="font-bold text-slate-100 truncate">{item.drug.brandName}</h4>
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
-                        <span className="text-slate-300">{item.drug.genericName}</span>
-                        <span>•</span>
-                        <span className="capitalize bg-slate-800 px-1.5 py-0.2 rounded text-slate-300 font-medium">
-                          Unit: {item.saleUnit}
-                        </span>
-                        <span>•</span>
-                        <span className="text-amber-400 font-mono">
-                          Shelf: {item.selectedBatch.location}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateQuantity(item.id, -1)}
-                          className="p-1 text-slate-400 hover:text-slate-200"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <span className="px-2 font-mono font-bold text-slate-100">{item.quantity}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateQuantity(item.id, 1)}
-                          className="p-1 text-slate-400 hover:text-slate-200"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(item.id)}
-                        className="text-slate-500 hover:text-red-400 p-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+            {/* Controlled Drugs Warning Indicator */}
+            {hasControlledItemsInCart && (
+              <div className="bg-purple-950/60 border border-purple-700/60 p-3 rounded-2xl mb-3 flex items-center gap-2 text-xs text-purple-300 animate-pulse">
+                <ShieldAlert className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                <span>
+                  <strong>GPhC Regulated Item:</strong> Dangerous Drugs Register (DDR) recording and Superintendent authorization active.
+                </span>
               </div>
             )}
 
-            {/* Custom Notes for Pharmacist */}
-            <div className="pt-2 border-t border-slate-800/80">
+            {/* Clerk Custom Notes for Staging / Multi-Operator */}
+            <div className="pt-2 border-t border-slate-800/80 mb-3">
               <label className="block text-[11px] text-slate-400 mb-1 flex items-center gap-1">
                 <FileText className="w-3 h-3 text-slate-500" />
-                Notes for Pharmacist / Dispensary
+                Counter Notes / Patient Remarks
               </label>
               <input
                 type="text"
                 value={clerkNotes}
                 onChange={(e) => setClerkNotes(e.target.value)}
-                placeholder="e.g. 'Patient has mild throat irritation' or 'Requested local formulation'"
+                placeholder="e.g. 'Patient requested generic substitution' or 'Walk-in cash'"
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 text-xs placeholder-slate-500 focus:outline-none focus:border-sky-500"
               />
             </div>
 
-            {/* Backend Controlled Drug Intercept Badge (Informational only - no doctor forms on clerk screen) */}
-            {containsControlled && (
-              <div className="bg-amber-950/50 border border-amber-800/80 p-2.5 rounded-xl flex items-start gap-2 text-xs text-amber-300">
-                <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Backend Intercept Notice:</strong> This basket contains Schedule 2/Class A items. The backend will route this payload to <code>PENDING_CLINICAL_CLEARANCE</code> for Pharmacist validation.
+            {/* Subtotal & Action Buttons */}
+            <div className="pt-3 border-t border-slate-800 space-y-3">
+              <div className="flex justify-between items-center text-xs text-slate-400">
+                <span>Items Subtotal:</span>
+                <span className="font-mono font-bold text-slate-200">GHS {cartTotal.toFixed(2)}</span>
+              </div>
+
+              <div className="flex justify-between items-center text-sm font-bold text-slate-100">
+                <span>Gross Payable:</span>
+                <span className="text-xl font-mono text-emerald-400 font-black">
+                  GHS {cartTotal.toFixed(2)}
                 </span>
               </div>
-            )}
 
-            {/* Single Order Staging Trigger */}
-            <div className="pt-2">
+              {/* Action 1: Split-Billing & Ghanaian Multi-Tender Checkout (PRIMARY) */}
+              <button
+                onClick={onProceedToSplitCheckout}
+                disabled={cart.length === 0}
+                className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
+                  cart.length === 0
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-950/50'
+                }`}
+                title="Split bill across Cash, MoMo, GhQR, NHIS, and Private Insurance (F4)"
+              >
+                <Split className="w-4 h-4 text-slate-950" />
+                <span>SPLIT BILL & CHECKOUT [F4]</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              {/* Action 2: Stage Order to Dispensary Queue (SECONDARY) */}
               <button
                 type="button"
-                disabled={activeBasket.length === 0}
-                onClick={handleStageOrder}
-                className={`w-full py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
-                  activeBasket.length === 0
-                    ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                    : 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/20'
+                disabled={cart.length === 0}
+                onClick={handleStageToQueue}
+                className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all border ${
+                  cart.length === 0
+                    ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                    : 'bg-slate-950 hover:bg-slate-800 text-sky-400 hover:text-sky-300 border-sky-800/80 shadow-sm'
                 }`}
-                title="Stage order to queue (POST /api/v1/orders/stage) - Hotkey: F2"
+                title="Stage order to queue for Pharmacist or Cashier (F2)"
               >
-                <Send className="w-4 h-4" />
-                <span>STAGE ORDER FOR DISPENSARY (POST /api/v1/orders/stage) • [F2]</span>
+                <Send className="w-3.5 h-3.5" />
+                <span>Stage Order to Dispensary Queue [F2]</span>
               </button>
             </div>
           </div>

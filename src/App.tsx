@@ -56,7 +56,10 @@ import { MusicPlayerBar } from './components/music/MusicPlayerBar';
 import { LyriaMusicModal } from './components/music/LyriaMusicModal';
 import { db, doc, setDoc, collection, addDoc } from './lib/firebase';
 
-// Personas
+// Personas & Station Authentication
+import { StationLoginScreen } from './components/auth/StationLoginScreen';
+import { InactivityWarningModal } from './components/auth/InactivityWarningModal';
+import { useAutoLogout } from './hooks/useAutoLogout';
 import { CounterClerkDashboard } from './components/personas/CounterClerkDashboard';
 import { PharmacistWorkspace } from './components/personas/PharmacistWorkspace';
 import { PosCashierTerminal } from './components/personas/PosCashierTerminal';
@@ -65,26 +68,35 @@ import { OwnerExecutiveHub } from './components/personas/OwnerExecutiveHub';
 function PharmacyAppInner() {
   const { currentUser, userProfile, updateUserRole, signOut } = useAuth();
 
-  // Active User Role & Navigation View Tabs
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole>(userProfile?.role || 'Clerk');
-  const [activeTab, setActiveTab] = useState<AppTabType>('clerk');
+  // Active Station (Selected strictly at Login Screen)
+  const [activeStation, setActiveStation] = useState<UserRole | null>(() => {
+    const saved = localStorage.getItem('pharmatrack_active_station') as UserRole;
+    return saved || null;
+  });
+
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole>(() => {
+    const saved = localStorage.getItem('pharmatrack_active_station') as UserRole;
+    return saved || userProfile?.role || 'Clerk';
+  });
+
   const [logoutNotification, setLogoutNotification] = useState<string | null>(null);
 
-  // Sync role with auth profile if present
-  useEffect(() => {
-    if (userProfile?.role) {
-      setCurrentUserRole(userProfile.role);
-    }
-  }, [userProfile?.role]);
-
-  const handleRoleChange = (role: UserRole) => {
+  // Sync role when active station changes
+  const handleSelectStation = (role: UserRole) => {
+    setActiveStation(role);
     setCurrentUserRole(role);
+    localStorage.setItem('pharmatrack_active_station', role);
     updateUserRole(role);
+    logAuditEvent(
+      `Staff Station Activated: ${role.toUpperCase()}`,
+      'SETTINGS',
+      { role, newValue: `Workstation session started for ${role}` }
+    );
   };
 
-  const handleLogout = async () => {
-    const previousRole = currentUserRole;
-    const userName = currentUser?.displayName || userProfile?.displayName || 'Pharmacy User';
+  const handleLogout = async (reason?: string | unknown) => {
+    const previousRole = activeStation || currentUserRole;
+    const userName = currentUser?.displayName || userProfile?.displayName || 'Pharmacy Staff';
 
     try {
       if (currentUser) {
@@ -94,24 +106,50 @@ function PharmacyAppInner() {
       console.warn('Sign out warning', err);
     }
 
-    // Reset back to initial default station
-    setCurrentUserRole('Clerk');
-    setActiveTab('clerk');
+    // Reset station back to null to show Station Login Screen
+    setActiveStation(null);
+    localStorage.removeItem('pharmatrack_active_station');
     setIsSuperintendentUnlocked(false);
 
+    // Only treat reason as string if it is actually a string (not a React SyntheticEvent / DOM Event)
+    const isReasonString = typeof reason === 'string' && reason.trim().length > 0;
+    const isTimeout = isReasonString && (
+      reason.toLowerCase().includes('timeout') ||
+      reason.toLowerCase().includes('inactivity') ||
+      reason.toLowerCase().includes('auto-lock')
+    );
+
     logAuditEvent(
-      `${userName} signed out and exited active dashboard (previous role: ${previousRole})`,
+      isTimeout
+        ? `Workstation Auto-Locked: 15min Inactivity (${previousRole})`
+        : `${userName} signed out and exited active workstation (previous station: ${previousRole})`,
       'SETTINGS',
       {
         userName,
         role: previousRole,
-        newValue: 'Dashboard session ended - switched to default Clerk POS view'
+        newValue: isReasonString ? reason : 'Workstation session ended - returned to Station Login Screen'
       }
     );
     setAuditLogs(getStoredAuditLogs());
-    setLogoutNotification('Logged out successfully. Active dashboard closed.');
-    setTimeout(() => setLogoutNotification(null), 4000);
+    setLogoutNotification(
+      isTimeout
+        ? 'Workstation locked automatically after 15 minutes of inactivity for security.'
+        : 'Logged out successfully. Returned to station sign-in screen.'
+    );
+    setTimeout(() => setLogoutNotification(null), 5000);
   };
+
+  // 15-Minute Workstation Idle / Auto-Logout Hook for high-traffic pharmacy security
+  const {
+    isWarning: isIdleWarning,
+    remainingSeconds: idleRemainingSeconds,
+    extendSession: extendIdleSession
+  } = useAutoLogout({
+    timeoutMs: 15 * 60 * 1000, // 15 minutes
+    warningMs: 60 * 1000,      // 60 seconds warning before auto-lock
+    enabled: Boolean(activeStation),
+    onLogout: () => handleLogout('Automatic timeout: 15 minutes of workstation inactivity in high-traffic pharmacy environment')
+  });
 
   // Core Data States (Initialized from persistent LocalStorage)
   const [drugs, setDrugs] = useState<DrugItem[]>(() => getStoredDrugs());
@@ -582,27 +620,36 @@ function PharmacyAppInner() {
     alert('System reset to clean Ghanaian pharmacy initial baseline state.');
   };
 
+  // 1. If no station is active, show the dedicated Station Login Screen
+  if (!activeStation) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+        <StationLoginScreen
+          config={config}
+          onSelectStation={handleSelectStation}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
+        />
+
+        {/* Floating Ambient Focus Music Player */}
+        <MusicPlayerBar onOpenGenerator={() => setIsMusicModalOpen(true)} />
+
+        {/* Lyria AI Focus Music Generator Modal */}
+        <LyriaMusicModal
+          isOpen={isMusicModalOpen}
+          onClose={() => setIsMusicModalOpen(false)}
+        />
+      </div>
+    );
+  }
+
+  // 2. Active Workstation Screen
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
-      {/* Top Navigation & Status Badges */}
+      {/* Top Station Navigation & Status Badges */}
       <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        currentUserRole={currentUserRole}
-        onRoleChange={(newRole) => {
-          setCurrentUserRole(newRole);
-          if (newRole === 'Clerk') {
-            if (activeTab === 'audit' || activeTab === 'owner' || activeTab === 'pharmacist') {
-              setActiveTab('clerk');
-            }
-          } else if (newRole === 'Pharmacist') {
-            setActiveTab('pharmacist');
-          } else if (newRole === 'Cashier') {
-            setActiveTab('cashier');
-          } else if (newRole === 'Owner') {
-            setActiveTab('owner');
-          }
-        }}
+        activeTab={activeStation === 'Clerk' ? 'clerk' : activeStation === 'Pharmacist' ? 'pharmacist' : activeStation === 'Cashier' ? 'cashier' : 'owner'}
+        setActiveTab={() => {}}
+        currentUserRole={activeStation}
         config={config}
         onToggleOnlineMode={handleToggleOnlineMode}
         isSuperintendentUnlocked={isSuperintendentUnlocked}
@@ -624,7 +671,7 @@ function PharmacyAppInner() {
         pendingPharmacistCount={pendingPharmacistCount}
         pendingCashierCount={pendingCashierCount}
         pendingPoCount={pendingPoCount}
-        onLogout={handleLogout}
+        onLogout={() => handleLogout()}
       />
 
       {/* Logout Notification Toast Banner */}
@@ -645,15 +692,26 @@ function PharmacyAppInner() {
         </div>
       )}
 
-      {/* Main Content View Switcher */}
+      {/* Dedicated Single Workstation Screen */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6">
-        {/* User 1: Counter Clerk Dashboard */}
-        {activeTab === 'clerk' && (
+        {/* Workstation 1: Counter Sales Station (Counter Clerk) */}
+        {activeStation === 'Clerk' && (
           <CounterClerkDashboard
             drugs={drugs}
             patients={patients}
             queue={queue}
             currentUserRole={currentUserRole}
+            cart={cart}
+            setCart={setCart}
+            currentLane={currentLane}
+            setCurrentLane={setCurrentLane}
+            selectedPatient={selectedPatient}
+            setSelectedPatient={setSelectedPatient}
+            prescription={prescription}
+            setPrescription={setPrescription}
+            useNhisTariff={useNhisTariff}
+            setUseNhisTariff={setUseNhisTariff}
+            onProceedToSplitCheckout={() => setIsSplitModalOpen(true)}
             onAddToQueue={(newBasket) => {
               const updated = [newBasket, ...queue];
               setQueue(updated);
@@ -665,12 +723,12 @@ function PharmacyAppInner() {
               setAuditLogs(getStoredAuditLogs());
             }}
             config={config}
-            onLogout={handleLogout}
+            onLogout={() => handleLogout()}
           />
         )}
 
-        {/* User 2: Superintendent Pharmacist Clinical Workspace */}
-        {activeTab === 'pharmacist' && (
+        {/* Workstation 2: Clinical Dispensing Station (Superintendent Pharmacist) */}
+        {activeStation === 'Pharmacist' && (
           <PharmacistWorkspace
             queue={queue}
             currentUserRole={currentUserRole}
@@ -688,12 +746,12 @@ function PharmacyAppInner() {
               });
             }}
             onAuditLogUpdate={() => setAuditLogs(getStoredAuditLogs())}
-            onLogout={handleLogout}
+            onLogout={() => handleLogout()}
           />
         )}
 
-        {/* User 3: POS Cashier Terminal */}
-        {activeTab === 'cashier' && (
+        {/* Workstation 3: POS Billing & Cashier Station (Cashier) */}
+        {activeStation === 'Cashier' && (
           <PosCashierTerminal
             queue={queue}
             currentUserRole={currentUserRole}
@@ -704,12 +762,12 @@ function PharmacyAppInner() {
               setIsReceiptModalOpen(true);
             }}
             onAuditLogUpdate={() => setAuditLogs(getStoredAuditLogs())}
-            onLogout={handleLogout}
+            onLogout={() => handleLogout()}
           />
         )}
 
-        {/* User 4: Executive MD & Owner Hub */}
-        {activeTab === 'owner' && (
+        {/* Workstation 4: Executive MD & Owner Station */}
+        {activeStation === 'Owner' && (
           <OwnerExecutiveHub
             purchaseOrders={purchaseOrders}
             currentUserRole={currentUserRole}
@@ -726,99 +784,13 @@ function PharmacyAppInner() {
             auditLogs={auditLogs}
             insurers={insurers}
             config={config}
-            onNavigateToTab={(tab) => setActiveTab(tab)}
+            onNavigateToTab={(tab) => {
+              if (tab === 'audit') {
+                // Keep inside owner hub
+              }
+            }}
             onAuditLogUpdate={() => setAuditLogs(getStoredAuditLogs())}
-            onLogout={handleLogout}
-          />
-        )}
-
-        {/* Core Module 1: Dual-Zone POS */}
-        {activeTab === 'pos' && (
-          <PosLane
-            drugs={drugs}
-            patients={patients}
-            cart={cart}
-            setCart={setCart}
-            currentLane={currentLane}
-            setCurrentLane={setCurrentLane}
-            selectedPatient={selectedPatient}
-            setSelectedPatient={setSelectedPatient}
-            prescription={prescription}
-            setPrescription={setPrescription}
-            useNhisTariff={useNhisTariff}
-            setUseNhisTariff={setUseNhisTariff}
-            onProceedToSplitCheckout={() => setIsSplitModalOpen(true)}
-            config={config}
-          />
-        )}
-
-        {/* Core Module 2: FEFO Inventory & Reorder Engine */}
-        {activeTab === 'inventory' && (
-          <InventoryFefo
-            drugs={drugs}
-            onUpdateDrug={(updated) => {
-              const list = drugs.map(d => (d.id === updated.id ? updated : d));
-              setDrugs(list);
-              logAuditEvent(
-                `Updated Batches/Stock for ${updated.brandName}`,
-                'INVENTORY',
-                { entityId: updated.id, newValue: `${updated.batches.reduce((s,b)=>s+b.quantity,0)} units total` }
-              );
-              setAuditLogs(getStoredAuditLogs());
-            }}
-            onAddNewDrug={(newDrug) => {
-              setDrugs([newDrug, ...drugs]);
-              logAuditEvent(`Added New Drug ${newDrug.brandName}`, 'INVENTORY', { entityId: newDrug.id });
-              setAuditLogs(getStoredAuditLogs());
-            }}
-            config={config}
-            onRequireSuperintendentPin={handleRequireSuperintendentPin}
-            isSuperintendentUnlocked={isSuperintendentUnlocked}
-          />
-        )}
-
-        {/* Core Module 3: NHIS & Private Insurance Debtor Ledger + G-Form */}
-        {activeTab === 'nhis' && (
-          <NhisDebtorLedger
-            transactions={transactions}
-            insurers={insurers}
-            onUpdateInsurer={(updated) => {
-              const list = insurers.map(i => (i.id === updated.id ? updated : i));
-              setInsurers(list);
-              logAuditEvent(
-                `Updated Debtor Ledger for ${updated.name}`,
-                'PRICING',
-                { entityId: updated.id, newValue: `Balance GHS ${updated.outstandingBalance.toFixed(2)}` }
-              );
-              setAuditLogs(getStoredAuditLogs());
-            }}
-            config={config}
-            onAuditLogUpdate={() => setAuditLogs(getStoredAuditLogs())}
-          />
-        )}
-
-        {/* Core Module 4: Controlled Substances (DDR) */}
-        {activeTab === 'ddr' && (
-          <DangerousDrugsRegister
-            ddrEntries={ddrEntries}
-            config={config}
-          />
-        )}
-
-        {/* Core Module 5: GRA E-VAT & Audit Trail */}
-        {activeTab === 'audit' && (
-          <GraAuditLog
-            transactions={transactions}
-            auditLogs={auditLogs}
-            config={config}
-            onSyncOfflineQueue={handleSyncOfflineQueue}
-            isSyncing={isSyncingQueue}
-            onTransactionsUpdate={setTransactions}
-            onAuditLogUpdate={() => setAuditLogs(getStoredAuditLogs())}
-            onViewReceipt={(txn) => {
-              setActiveReceiptTransaction(txn);
-              setIsReceiptModalOpen(true);
-            }}
+            onLogout={() => handleLogout()}
           />
         )}
       </main>
@@ -885,7 +857,24 @@ function PharmacyAppInner() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        onSelectRole={handleRoleChange}
+        onSelectRole={handleSelectStation}
+      />
+
+      {/* 15-Minute Inactivity Auto-Lock Warning Modal */}
+      <InactivityWarningModal
+        isOpen={isIdleWarning}
+        remainingSeconds={idleRemainingSeconds}
+        onExtend={extendIdleSession}
+        onLogout={() => handleLogout('Manual lock from inactivity countdown dialog')}
+        stationName={
+          activeStation === 'Clerk'
+            ? 'Counter Sales Station'
+            : activeStation === 'Pharmacist'
+            ? 'Clinical Dispensing Station'
+            : activeStation === 'Cashier'
+            ? 'POS Cashier Station'
+            : 'Executive Management Station'
+        }
       />
 
       {/* Lyria AI Focus Music Generator Modal */}
